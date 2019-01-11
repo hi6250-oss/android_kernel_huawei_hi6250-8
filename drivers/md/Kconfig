@@ -518,7 +518,7 @@ config DM_ANDROID_VERITY
 	depends on KEYS
 	depends on ASYMMETRIC_KEY_TYPE
 	depends on ASYMMETRIC_PUBLIC_KEY_SUBTYPE
-	depends on MD_LINEAR
+	depends on MD_LINEAR=y
 	---help---
 	  This device-mapper target is virtually a VERITY target. This
 	  target is setup by reading the metadata contents piggybacked

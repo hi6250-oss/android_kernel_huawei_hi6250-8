@@ -1265,11 +1265,9 @@ wl_cfgp2p_act_frm_search(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 			default_chan_list[i] = channel;
 		}
 	} else {
-	    default_chan_list[0] = SOCIAL_CHAN_1;
-	    if(SOCIAL_CHAN_CNT == chan_cnt){   
-    		default_chan_list[1] = SOCIAL_CHAN_2;
-    		default_chan_list[2] = SOCIAL_CHAN_3;
-        }
+		default_chan_list[0] = SOCIAL_CHAN_1;
+		default_chan_list[1] = SOCIAL_CHAN_2;
+		default_chan_list[2] = SOCIAL_CHAN_3;
 	}
 	ret = wl_cfgp2p_escan(cfg, ndev, true, chan_cnt,
 		default_chan_list, WL_P2P_DISC_ST_SEARCH,

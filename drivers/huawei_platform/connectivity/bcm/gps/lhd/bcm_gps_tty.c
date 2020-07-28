@@ -43,7 +43,7 @@
 #define DTS_COMP_GPS_POWER_NAME "huawei,gps_power"
 #define BUFFER_SIZE 16
 #define PORT_NAME "/dev/ttyAMA3"
-#define SIZE_MAX      (18446744073709551615UL)
+
 #define USE_TIMER 1
 //#define BCM_TTY_DEBUG_INFO 0
 //#define BCM_TTY_DEBUG 0
@@ -548,9 +548,6 @@ static ssize_t bcm_tty_write(struct file *filp, const char __user *buf, size_t s
 	priv = (struct bcm_tty_priv *)base->priv_data;
 
 	spin_lock_irqsave(&base->lock, flags);
-	if(size > SIZE_MAX){
-		size = SIZE_MAX;
-	}
 	base->total_bytes_to_write+=size;
 	base->total_write_request++;
 

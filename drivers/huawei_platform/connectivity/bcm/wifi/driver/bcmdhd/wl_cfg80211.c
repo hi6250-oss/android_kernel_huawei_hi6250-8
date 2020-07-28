@@ -14580,7 +14580,11 @@ wl_notify_connect_status(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 }
 
 #ifdef WL_TEM_CTRL
+#ifdef CONFIG_BCMDHD_PCIE
+#define HW_MAX_CHIP_TEM 110
+#else
 #define HW_MAX_CHIP_TEM 100
+#endif
 #define WLC_E_RESULT_TMPCTL 0
 #define WLC_E_RESULT_VOLS 1
 #define HW_MAX_CHIP_TEM_SPECIAL (107)
@@ -14594,7 +14598,7 @@ wl_notify_connect_status(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 struct hw_tem_ctrl_event{
     u16  duty;        /* Adjusted to the percentage */
     u16  decrease;    /* Duty cycle increase or decrease(1:decrease, 0:increase) */
-    int32  temperature; /* Current chipset temperature */
+    u32  temperature; /* Current chipset temperature */
 };
 
 struct hw_tem_ctrl_electric_event {
@@ -14628,7 +14632,6 @@ static u32  tem_ctrl_start_temperature = 0;
 static u16  tem_ctrl_min_duty = HW_TEM_CTRL_DUTY_END_PCT;
 static u64  tem_ctrl_nrate = 0;
 static u32  tem_ctrl_rssi = 0;
-static int32  tem_ctrl_tempthresh = 85;
 static u32  tem_ctrl_band = 2; /* 2: 2.4G, 5: 5G */
 static struct hw_tem_ctrl_electric_value tem_ctrl_elec_tmp = {0,0,0,0};
 static struct hw_tem_ctrl_electric_value tem_ctrl_elec_start_record = {0,0,0,0};
@@ -14714,17 +14717,6 @@ wl_hw_temp_dmd_get_start_info(struct net_device *dev) {
     }
 }
 
-void
-wl_hw_tem_get_tempthresh_info(struct net_device *dev) {
-    s32 err = 0;
-
-    err = wldev_iovar_getint(dev, "phy_tempthresh", &tem_ctrl_tempthresh);
-    if (err < 0) {
-        WL_ERR(("get tempthresh err: %d\n", err));
-        tem_ctrl_tempthresh = 85;
-    }
-}
-
 void wl_hw_tem_ctrl_event_report(void)
 {
     if(tem_ctrl_started){
@@ -14743,7 +14735,7 @@ void wl_hw_tem_ctrl_event_report(void)
                             tem_ctrl_elec_maxtemp_record.elec2, tem_ctrl_elec_maxtemp_record.elec3,
                             tem_ctrl_elec_maxtemp_record.elec4, tem_ctrl_max_temp_time);
         tmp_len += snprintf(dsm_buff+tmp_len, DSM_BUFF_SIZE_MAX-tmp_len, "MinDuty:%d@%s", tem_ctrl_min_duty, tem_ctrl_min_duty_time);
-        hw_wifi_dsm_client_notify(DSM_WIFI_TEM_CTRL_EVENT, dsm_buff);
+        hw_wifi_dsm_client_notify(DSM_WIFI_WLC_GET_CHANNEL_ERROR, dsm_buff);
         WL_ERR(("dsm_buff:%s\n", dsm_buff));
 #endif
 	    static struct timeval tem_ctrl_cycle_end;
@@ -14774,73 +14766,6 @@ static void wl_hw_tem_ctrl_get_elec(struct hw_tem_ctrl_electric_value *elec_valu
     }
 }
 
-static void wl_hw_tem_ctrl_normal_event(struct hw_tem_ctrl_event *tem_ctl) {
-    if (NULL == tem_ctl) {
-        WL_ERR(("wl_hw_tem_ctrl_normal_event invalid param\n"));
-        return;
-    }
-    /* duty=10 count for chr */
-    if (HW_TEM_CTRL_MIN_DUTYCYCLE == tem_ctl->duty) {
-        tem_ctrl_min_duty_cnt++;
-    }
-    /* temperature count for chr when temperature is higher than HW_MAX_CHIP_TEM */
-    if (HW_MAX_CHIP_TEM <= tem_ctl->temperature) {
-        tem_ctrl_exceed_tem_cnt++;
-    }
-    /* check the maximum temperature */
-    if (tem_ctl->temperature > tem_ctrl_max_temperature) {
-        tem_ctrl_max_temperature = tem_ctl->temperature;
-        wl_hw_get_timestamp(tem_ctrl_max_temp_time, HW_TIMESTAMP_STR_SIZE, TS_TIME);
-        wl_hw_tem_ctrl_get_elec(&tem_ctrl_elec_maxtemp_record);
-        /* report when the temperature is higher than HW_MAX_CHIP_TEM and higher than the pre_max temperature */
-        if (HW_MAX_CHIP_TEM <= tem_ctl->temperature) {
-            char dsm_buff[DSM_BUFF_SIZE_MAX] = {0};
-            snprintf(dsm_buff, DSM_BUFF_SIZE_MAX, "MaxTemp reach %d(%d,%d,%d,%d) duty:%d\n", tem_ctl->temperature,
-                tem_ctrl_elec_maxtemp_record.elec1, tem_ctrl_elec_maxtemp_record.elec2,
-                tem_ctrl_elec_maxtemp_record.elec3, tem_ctrl_elec_maxtemp_record.elec4, tem_ctl->duty);
-            WL_ERR(("Reach max temp, dmd buff:%s\n", dsm_buff));
-#ifdef HW_WIFI_DMD_LOG
-            hw_wifi_dsm_client_notify(DSM_WIFI_CHIPSET_DAMAGE_WARNING, dsm_buff);
-#endif
-        }
-    }
-    /* check the minimum duty */
-    if (HW_TEM_CTRL_DECREASE == tem_ctl->decrease && tem_ctrl_min_duty > tem_ctl->duty) {
-        tem_ctrl_min_duty = tem_ctl->duty;
-        wl_hw_get_timestamp(tem_ctrl_min_duty_time, HW_TIMESTAMP_STR_SIZE, TS_TIME);
-    }
-    /* temperature control stop */
-    else if ((HW_TEM_CTRL_DUTY_END_PCT == tem_ctl->duty)&&(HW_TEM_CTRL_INCREASE == tem_ctl->decrease)) {
-        WL_ERR(("temperature control stops\n"));
-        wl_hw_tem_ctrl_event_report();
-    }
-    /* update duty */
-    tem_ctrl_pre_duty = tem_ctl->duty;
-}
-
-static void wl_hw_tem_ctrl_abnormal_event(struct hw_tem_ctrl_event *tem_ctl, struct bcm_cfg80211 *cfg) {
-    char dsm_buff[DSM_BUFF_SIZE_MAX] = {0};
-    struct hw_tem_ctrl_electric_value tem_ctrl_elec_error_record = {0,0,0,0};
-
-    if (NULL == tem_ctl) {
-        WL_ERR(("wl_hw_tem_ctrl_abnormal_event invalid param\n"));
-        return;
-    }
-    wl_hw_tem_ctrl_get_elec(&tem_ctrl_elec_error_record);
-    snprintf(dsm_buff, DSM_BUFF_SIZE_MAX, "duty = %d, decrease = %d, temperature = %d(%d,%d,%d,%d)\n",
-        tem_ctl->duty, tem_ctl->decrease, tem_ctl->temperature,
-        tem_ctrl_elec_error_record.elec1, tem_ctrl_elec_error_record.elec2,
-        tem_ctrl_elec_error_record.elec3, tem_ctrl_elec_error_record.elec4);
-    WL_ERR(("Error temp_ctrl_event, dmd buff:%s\n", dsm_buff));
-#ifdef HW_WIFI_DMD_LOG
-    dhd_pub_t *dhd =  (dhd_pub_t *)(cfg->pub);
-    if (dhd->op_mode & DHD_FLAG_STA_MODE){
-        hw_wifi_dsm_client_notify(DSM_WIFI_WLC_SET_PASSIVE_SCAN_ERROR, dsm_buff);
-    }
-#endif
-}
-
-
 /*
  * deal with WLC_E_TEM_CTRL_EVENT
  * WLC_E_TEM_CTRL_EVENT is received when duty cycle change or
@@ -14857,34 +14782,69 @@ wl_hw_tem_ctrl_event_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev
     struct net_device *ndev = cfgdev_to_wlc_ndev(cfgdev, cfg);
 
     if ((event == WLC_E_TEM_CTRL_EVENT) && (status == WLC_E_RESULT_TMPCTL)) {
-        tem_ctl = data;
-        wl_hw_tem_get_tempthresh_info(ndev);
-
+		tem_ctl = data;
         if ((e->datalen >= sizeof(struct hw_tem_ctrl_event)) && (tem_ctl)) {
-            /* Print tem_ctrl_event kernel log */
             WL_ERR(("current duty = %d, decrease=%d, temperature=%d\n",
-                tem_ctl->duty, tem_ctl->decrease, tem_ctl->temperature));
+            tem_ctl->duty, tem_ctl->decrease, tem_ctl->temperature));
+			if(HW_TEM_CTRL_MIN_DUTYCYCLE == tem_ctl->duty)
+				tem_ctrl_min_duty_cnt++;
+
+            /* Record the maximum temperature */
+            if(tem_ctl->temperature > tem_ctrl_max_temperature) {
+                tem_ctrl_max_temperature = tem_ctl->temperature;
+
+				wl_hw_get_timestamp(tem_ctrl_max_temp_time, HW_TIMESTAMP_STR_SIZE, TS_TIME);
+                wl_hw_tem_ctrl_get_elec(&tem_ctrl_elec_maxtemp_record);
+#ifdef HW_WIFI_DMD_LOG
+                /* report when the temperature is higher than HW_MAX_CHIP_TEM */
+                if(HW_MAX_CHIP_TEM <= tem_ctl->temperature){
+                    char dsm_buff[DSM_BUFF_SIZE_MAX] = {0};
+                    snprintf(dsm_buff, DSM_BUFF_SIZE_MAX, "MaxTemp reach %d(%d,%d,%d,%d) duty:%d\n", tem_ctl->temperature,
+                            tem_ctrl_elec_maxtemp_record.elec1, tem_ctrl_elec_maxtemp_record.elec2,
+                            tem_ctrl_elec_maxtemp_record.elec3, tem_ctrl_elec_maxtemp_record.elec4, tem_ctl->duty);
+                    WL_ERR(("Reach max temp, dmd buff:%s\n", dsm_buff));
+                    if (HW_MAX_CHIP_TEM_SPECIAL == tem_ctl->temperature) {
+                        hw_wifi_dsm_client_notify(DSM_WIFI_WLC_SET_PASSIVE_SCAN_ERROR, dsm_buff);
+                    } else {
+                        hw_wifi_dsm_client_notify(DSM_WIFI_WLC_SET_SCANSUPPRESS_ERROR, dsm_buff);
+                    }
+                }
+#endif
+            }
 
             /* temperature control start */
-            if ((HW_TEM_CTRL_DUTY_START_PCT == tem_ctl->duty) && (HW_TEM_CTRL_DECREASE == tem_ctl->decrease)
-                && (HW_TEM_CTRL_DUTY_END_PCT == tem_ctrl_pre_duty)&&(tem_ctrl_tempthresh <= tem_ctl->temperature)) {
+           if((HW_TEM_CTRL_DUTY_START_PCT == tem_ctl->duty) && (HW_TEM_CTRL_DECREASE == tem_ctl->decrease)
+                && (HW_TEM_CTRL_DUTY_END_PCT == tem_ctrl_pre_duty)) {
                 tem_ctrl_started = TRUE;
-                do_gettimeofday(&tem_ctrl_cycle_start);
+				do_gettimeofday(&tem_ctrl_cycle_start);
                 wl_hw_get_timestamp(tem_ctrl_start_time, HW_TIMESTAMP_STR_SIZE, TS_DATETIME);
                 WL_ERR(("tem_ctrl_start_time:%s\n", tem_ctrl_start_time));
-                tem_ctrl_band = (cfg->channel <= 14) ? 2 : 5;
+				tem_ctrl_band = (cfg->channel <= 14) ? 2 : 5;
                 tem_ctrl_start_temperature = tem_ctl->temperature;
                 wl_hw_tem_ctrl_get_elec(&tem_ctrl_elec_start_record);
                 wl_hw_temp_dmd_get_start_info(ndev);
             }
-
-            /* normal temperature control process */
-            if (tem_ctrl_started) {
-                wl_hw_tem_ctrl_normal_event(tem_ctl);
-            } else {
-                /* abnormal temperature control process */
-                wl_hw_tem_ctrl_abnormal_event(tem_ctl, cfg);
+            /* check minimum duty */
+            if (HW_TEM_CTRL_DECREASE == tem_ctl->decrease && tem_ctrl_min_duty > tem_ctl->duty) {
+                tem_ctrl_min_duty = tem_ctl->duty;
+                wl_hw_get_timestamp(tem_ctrl_min_duty_time, HW_TIMESTAMP_STR_SIZE, TS_TIME);
             }
+            /* temperature control stop */
+            else if((HW_TEM_CTRL_DUTY_END_PCT == tem_ctl->duty)&&(HW_TEM_CTRL_INCREASE == tem_ctl->decrease)) {
+                wl_hw_tem_ctrl_event_report();
+            }
+
+			/* update duty */
+            tem_ctrl_pre_duty = tem_ctl->duty;
+#ifdef HW_WIFI_DMD_LOG
+            /* report when the temperature is higher than 90 */
+            if(HW_MAX_CHIP_TEM <= tem_ctl->temperature){
+		tem_ctrl_exceed_tem_cnt++;
+                char dsm_buff[DSM_BUFF_SIZE_MAX] = {0};
+                snprintf(dsm_buff, DSM_BUFF_SIZE_MAX, "wifi chipset tem upto %d degree\n", tem_ctl->temperature);
+                hw_wifi_dsm_client_notify(DSM_WIFI_WLC_SET_SCANSUPPRESS_ERROR, dsm_buff);
+            }
+#endif
         }
     } else if ((event == WLC_E_TEM_CTRL_EVENT) && (status == WLC_E_RESULT_VOLS)) {
         tem_ctl_elec = data;
@@ -15344,30 +15304,6 @@ static s32 wl_get_assoc_ies(struct bcm_cfg80211 *cfg, struct net_device *ndev)
 	assoc_info.req_len = htod32(assoc_info.req_len);
 	assoc_info.resp_len = htod32(assoc_info.resp_len);
 	assoc_info.flags = htod32(assoc_info.flags);
-#ifdef BCM_PATCH_CVE_2017_13292_13303
-
-	if (assoc_info.req_len >
-		(MAX_REQ_LINE + sizeof(struct dot11_assoc_req) +
-		((assoc_info.flags & WLC_ASSOC_REQ_IS_REASSOC) ?
-		ETHER_ADDR_LEN : 0))) {
-		return BCME_BADLEN;
-	}
-	if ((assoc_info.req_len > 0) &&
-	    (assoc_info.req_len < (sizeof(struct dot11_assoc_req) +
-		((assoc_info.flags & WLC_ASSOC_REQ_IS_REASSOC) ?
-		ETHER_ADDR_LEN : 0)))) {
-		return BCME_BADLEN;
-	}
-	if (assoc_info.resp_len >
-		(MAX_REQ_LINE + sizeof(struct dot11_assoc_resp))) {
-		return BCME_BADLEN;
-	}
-	if ((assoc_info.resp_len > 0) &&
-		(assoc_info.resp_len < sizeof(struct dot11_assoc_resp))) {
-		return BCME_BADLEN;
-	}
-
-#endif
 	if (conn_info->req_ie_len) {
 		conn_info->req_ie_len = 0;
 		bzero(conn_info->req_ie, sizeof(conn_info->req_ie));
@@ -17658,7 +17594,7 @@ static s32 wl_notify_escan_complete(struct bcm_cfg80211 *cfg,
 	if (timer_pending(&cfg->scan_timeout))
 		del_timer_sync(&cfg->scan_timeout);
 #if defined(ESCAN_RESULT_PATCH)
-	if ((likely(cfg->scan_request)||likely(cfg->sched_scan_req))
+	if (likely(cfg->scan_request)
 #ifdef BCM_PATCH_ESCAN_ABORTED_WLINFORMBSS
 		&& (!aborted)
 #endif /* BCM_PATCH_ESCAN_ABORTED_WLINFORMBSS */

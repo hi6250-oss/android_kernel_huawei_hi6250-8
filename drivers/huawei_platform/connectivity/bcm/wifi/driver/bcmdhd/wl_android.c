@@ -1743,11 +1743,7 @@ get_parameter_from_string(
                         break;
                         default:
                                 memcpy(dst, param_str_begin, parm_str_len);
-                                if (parm_str_len == param_max_len) {
-                                         *((char *)dst + parm_str_len - 1) = 0;
-                                } else {
-                                         *((char *)dst + parm_str_len) = 0;
-                                }
+                                *((char *)dst + parm_str_len) = 0;
                                 WL_ERROR((" written as a string:%s\n", (char *)dst));
                         break;
                 }
@@ -2186,7 +2182,7 @@ wl_iw_set_sar_enable(
        struct net_device *dev,
        int sar_enable)
 {
-       int error = -EINVAL;
+       int error;
 
        if (sar_enable == SAR_DISABLE) {
 		error = dev_wlc_intvar_set(dev, "sar_enable", 0);

@@ -3060,15 +3060,12 @@ oal_uint32  hmac_ap_up_rx_mgmt(hmac_vap_stru *pst_hmac_vap, oal_void *p_param)
     uc_mgmt_frm_type = mac_get_frame_sub_type(puc_mac_hdr);
 
 #if (_PRE_MULTI_CORE_MODE_OFFLOAD_DMAC == _PRE_MULTI_CORE_MODE)
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
     if(OAL_TRUE == g_ul_print_wakeup_mgmt)
     {
         g_ul_print_wakeup_mgmt = OAL_FALSE;
         OAM_WARNING_LOG1(pst_hmac_vap->st_vap_base_info.uc_vap_id, OAM_SF_RX, "{hmac_ap_up_rx_mgmt::wakeup mgmt type[0x%x]}",uc_mgmt_frm_type);
     }
 #endif
-#endif
-
 #ifdef _PRE_WLAN_FEATURE_HILINK
     pst_fbt_mgmt = &(pst_hmac_vap->st_fbt_mgmt);
 

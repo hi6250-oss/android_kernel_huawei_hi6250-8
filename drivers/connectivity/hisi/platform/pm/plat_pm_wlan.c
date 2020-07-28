@@ -318,9 +318,6 @@ struct wlan_pm_s*  wlan_pm_init(oal_void)
     pst_wlan_pm->ul_sleep_stage                = SLEEP_STAGE_INIT;
 
     pst_wlan_pm->st_wifi_srv_handler.p_wifi_srv_get_pm_pause_func = OAL_PTR_NULL;
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    pst_wlan_pm->st_wifi_srv_handler.p_data_wkup_print_en_func = OAL_PTR_NULL;
-#endif
 
     gpst_wlan_pm_info = pst_wlan_pm;
 

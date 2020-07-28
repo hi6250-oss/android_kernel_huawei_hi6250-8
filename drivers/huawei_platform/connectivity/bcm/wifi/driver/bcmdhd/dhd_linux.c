@@ -426,7 +426,6 @@ typedef struct dhd_info {
 #ifdef BCM_PCIE_UPDATE
 	wait_queue_head_t dhd_bus_busy_state_wait;
 #ifdef DHD_DEVWAKE_EARLY
-	struct mutex ifdel_mutex[DHD_MAX_IFS]; /* for protecting multiple interfaces deletion */
 	wait_queue_head_t devwake_wait;
 #endif /* DHD_DEVWAKE_EARLY */
 #endif
@@ -1824,6 +1823,9 @@ dhd_devwake_thread(void *data)
 			DHD_TRACE(("%s: deepsleep=%d\n", __FUNCTION__, dhd->pub.deepsleep));
 			if (dhd->pub.deepsleep) {
 				DHD_TRACE(("%s: disable deep-sleep\n", __FUNCTION__));
+				dhd_net_if_lock_local(dhd);
+				dhd_bus_stop_queue(dhd->pub.bus);
+				dhd_net_if_unlock_local(dhd);
 				/* wake up */
 				dhd_wlan_dev_wake(1);
 				/* wait until deepsleep become 0 */
@@ -1854,14 +1856,14 @@ dhd_devwake_thread(void *data)
 					/* reset error count */
 					dhd->pub.devwake_err = 0;
 				}
-			}
-			/* sync state */
-			if (dhd->pub.devwake_enable) {
-				dhd_net_if_lock_local(dhd);
-				dhd_bus_start_queue(dhd->pub.bus);
-				dhd_net_if_unlock_local(dhd);
-			} else {
-				DHD_ERROR(("%s: devwake disabled. Don't start queue again.\n", __FUNCTION__));
+				/* sync state */
+				if (dhd->pub.devwake_enable) {
+					dhd_net_if_lock_local(dhd);
+					dhd_bus_start_queue(dhd->pub.bus);
+					dhd_net_if_unlock_local(dhd);
+				} else {
+					DHD_ERROR(("%s: devwake disabled. Don't start queue again.\n", __FUNCTION__));
+				}
 			}
 
 			if (!wait_event_interruptible(dhd->dhd_bus_busy_state_wait,
@@ -1892,7 +1894,7 @@ dhd_devwake_init(dhd_pub_t *dhdp)
 	dhdp->devwake_enable = FALSE;
 }
 
-void
+static void
 dhd_devwake_release(dhd_pub_t *dhdp)
 {
 	unsigned long flags;
@@ -1910,7 +1912,7 @@ dhd_devwake_release(dhd_pub_t *dhdp)
 		DHD_ERROR(("%s: Tx abort, clean DHD_BUS_BUSY_IN_TX\n", __FUNCTION__));
 		dhdp->dhd_bus_busy_state &= ~DHD_BUS_BUSY_IN_TX;
 		/* Reset for next wifi on */
-		//dhd_bus_start_queue(dhdp->bus);
+		dhd_bus_start_queue(dhdp->bus);
 	}
 	DHD_GENERAL_UNLOCK(dhdp, flags);
 
@@ -3395,47 +3397,23 @@ dhd_txflowcontrol(dhd_pub_t *dhdp, int ifidx, bool state)
 		/* Flow control on all active interfaces */
 		dhdp->txoff = state;
 		for (i = 0; i < DHD_MAX_IFS; i++) {
-#ifdef DHD_DEVWAKE_EARLY
-			if (mutex_trylock(&dhd->ifdel_mutex[i])) {
-#endif
-				if (dhd->iflist[i]) {
-					net = dhd->iflist[i]->net;
-					if (net) {
-						if (state == ON)
-							netif_stop_queue(net);
-						else
-							netif_wake_queue(net);
-					}
-				}
-#ifdef DHD_DEVWAKE_EARLY
-				mutex_unlock(&dhd->ifdel_mutex[i]);
-			} else {
-				DHD_ERROR(("%s: intf(%d) is removing, don't allowed to access.\n",
-					__FUNCTION__, i));
+			if (dhd->iflist[i]) {
+				net = dhd->iflist[i]->net;
+				if (state == ON)
+					netif_stop_queue(net);
+				else
+					netif_wake_queue(net);
 			}
-#endif
 		}
 	}
 	else {
-#ifdef DHD_DEVWAKE_EARLY
-		if (mutex_trylock(&dhd->ifdel_mutex[ifidx])) {
-#endif
-			if (dhd->iflist[ifidx]) {
-				net = dhd->iflist[ifidx]->net;
-				if (net) {
-					if (state == ON)
-						netif_stop_queue(net);
-					else
-						netif_wake_queue(net);
-				}
-			}
-#ifdef DHD_DEVWAKE_EARLY
-			mutex_unlock(&dhd->ifdel_mutex[ifidx]);
-		} else {
-			DHD_ERROR(("%s: intf(%d) is removing, don't allowed to access.\n",
-				__FUNCTION__, i));
+		if (dhd->iflist[ifidx]) {
+			net = dhd->iflist[ifidx]->net;
+			if (state == ON)
+				netif_stop_queue(net);
+			else
+				netif_wake_queue(net);
 		}
-#endif
 	}
 }
 
@@ -5562,9 +5540,7 @@ dhd_remove_if(dhd_pub_t *dhdpub, int ifidx, bool need_rtnl_lock)
 {
 	dhd_info_t *dhdinfo = (dhd_info_t *)dhdpub->info;
 	dhd_if_t *ifp;
-#ifdef DHD_DEVWAKE_EARLY
-	mutex_lock(&dhdinfo->ifdel_mutex[ifidx]);
-#endif
+
 	ifp = dhdinfo->iflist[ifidx];
 	if (ifp != NULL) {
 		if (ifp->net != NULL) {
@@ -5602,9 +5578,7 @@ dhd_remove_if(dhd_pub_t *dhdpub, int ifidx, bool need_rtnl_lock)
 		ifp = NULL;
 #endif
 	}
-#ifdef DHD_DEVWAKE_EARLY
-	mutex_unlock(&dhdinfo->ifdel_mutex[ifidx]);
-#endif
+
 	return BCME_OK;
 }
 
@@ -5841,9 +5815,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	uint32 bus_num = -1;
 	uint32 slot_num = -1;
 	wifi_adapter_info_t *adapter = NULL;
-#ifdef DHD_DEVWAKE_EARLY
-	int i;
-#endif
 #ifdef HW_WIFI_DRIVER_NORMALIZE
 	char  chip_type_string[CHIP_NAME_MAX_LEN];
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
@@ -5935,13 +5906,6 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 		if ((ch > '9' || ch < '0') && (len < IFNAMSIZ - 2))
 			strcat(if_name, "%d");
 	}
-#ifdef DHD_DEVWAKE_EARLY
-	/* init all delete mutex protection of all ifs */
-	for (i = 0; i < DHD_MAX_IFS; i++) {
-		DHD_ERROR(("%s: init ifdel_mutex(%d)\n", __FUNCTION__, i));
-		mutex_init(&dhd->ifdel_mutex[i]);
-	}
-#endif
 #ifndef  BRCM_RSDB
 	net = dhd_allocate_if(&dhd->pub, 0, if_name, NULL, 0, TRUE);
 #else
@@ -8223,11 +8187,6 @@ dhd_inet6_work_handler(void *dhd_info, void *event_data, u8 event)
 		return;
 	}
 
-        if(dhd_get_fw_mode(pub->info) == DHD_FLAG_HOSTAP_MODE){
-                DHD_ERROR(("%s: hostap mode not allowed enable ndoe \n", __FUNCTION__));
-                return;
-        }
-
 	switch (ndo_work->event) {
 		case NETDEV_UP:
 			DHD_TRACE(("%s: Enable NDO and add ipv6 into table \n ", __FUNCTION__));
@@ -8789,21 +8748,18 @@ dhd_free(dhd_pub_t *dhdp)
 			dhd != (dhd_info_t *)dhd_os_prealloc(dhdp, DHD_PREALLOC_DHD_INFO, 0, FALSE))
 			MFREE(dhd->pub.osh, dhd, sizeof(*dhd));
 		dhd = NULL;
-
-		if (dhdp->soc_ram) {
-                        memset(dhdp->soc_ram, 0, dhdp->soc_ram_length);
-		}
-
 	}
-
+	if (dhdp->soc_ram) {
+		memset(dhdp->soc_ram, 0, dhdp->soc_ram_length);
+	}
 }
 void
 dhd_clear(dhd_pub_t *dhdp)
 {
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
-	if (dhdp) {
 #ifdef PCIE_FULL_DONGLE
+	if (dhdp) {
 		int i;
 		for (i = 0; i < ARRAYSIZE(dhdp->reorder_bufs); i++) {
 			if (dhdp->reorder_bufs[i]) {
@@ -8819,11 +8775,11 @@ dhd_clear(dhd_pub_t *dhdp)
 			}
 		}
 		dhd_sta_pool_clear(dhdp, DHD_MAX_STA);
+	}
 #endif
 
-		if (dhdp->soc_ram) {
-			memset(dhdp->soc_ram, 0, dhdp->soc_ram_length);
-		}
+	if (dhdp->soc_ram) {
+		memset(dhdp->soc_ram, 0, dhdp->soc_ram_length);
 	}
 
 }
@@ -9130,10 +9086,6 @@ dhd_os_devwake_check_deepsleep(dhd_pub_t *pub)
 	}
 
 	if (dhd->devwake_tsk.thr_pid >= 0) {
-		if (!binary_sema_task_is_running(&dhd->devwake_tsk)) {
-			dhd_bus_stop_queue(dhd->pub.bus);
-		}
-
 		if (binary_sema_up(&dhd->devwake_tsk)) {
 			DHD_TRACE(("%s: schedule dev wake thread+++\n", __FUNCTION__));
 		}
@@ -10660,14 +10612,6 @@ __dhd_apf_add_filter(struct net_device *ndev, uint32 filter_id,
 	}
 
 	cmd_len = sizeof(cmd);
-#ifdef BCM_PATCH_CVE_2016_8455
-	/* check if the program_len is more than the expected len */
-	if ((program_len > WL_APF_PROGRAM_MAX_SIZE) ||
-		(program == NULL)){
-		DHD_ERROR(("%s Invalid program_len: %d, program: %pK\n", __func__, program_len, program));
-		return -EINVAL;
-	}
-#endif
 	buf_len = cmd_len + WL_PKT_FILTER_FIXED_LEN +
 		WL_APF_PROGRAM_FIXED_LEN + program_len;
 

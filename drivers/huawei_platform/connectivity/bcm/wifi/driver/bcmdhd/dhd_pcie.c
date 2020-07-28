@@ -916,7 +916,7 @@ dhdpcie_advertise_bus_cleanup(dhd_pub_t	 *dhdp)
 	if (timeleft == 0) {
 		DHD_ERROR(("%s : Timeout due to dhd_bus_busy_state=0x%x\n",
 				__FUNCTION__, dhdp->dhd_bus_busy_state));
-		//BUG_ON(1);
+		BUG_ON(1);
 	}
 
 	return;
@@ -4816,18 +4816,13 @@ dhd_update_txflowrings(dhd_pub_t *dhd)
 
 		next = dll_next_p(item);
 		flow_ring_node = dhd_constlist_to_flowring(item);
-#ifndef HW_PCIE_STABILITY
+
 		/* Ensure that flow_ring_node in the list is Not Null */
 		ASSERT(flow_ring_node != NULL);
 
 		/* Ensure that the flowring node has valid contents */
 		ASSERT(flow_ring_node->prot_info != NULL);
-#else
-		if(flow_ring_node == NULL || flow_ring_node->prot_info == NULL ) {
-			DHD_ERROR(("%s: flow_ring_node is null pointer\n", __FUNCTION__));
-			break;
-		}
-#endif
+
 		dhd_prot_update_txflowring(dhd, flow_ring_node->flowid, flow_ring_node->prot_info);
 	}
 	DHD_FLOWRING_LIST_UNLOCK(bus->dhd->flowring_list_lock, flags);

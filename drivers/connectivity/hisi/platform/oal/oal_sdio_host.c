@@ -2268,10 +2268,6 @@ OAL_STATIC oal_int32 oal_sdio_suspend(struct device *dev)
     struct sdio_func *func;
     struct oal_sdio *hi_sdio;
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    struct wlan_pm_s *pst_wlan_pm;
-#endif
-
     OAL_IO_PRINT(KERN_ERR"+++++++sdio suspend+++++++++++++\n");
     if (NULL == dev)
     {
@@ -2300,15 +2296,6 @@ OAL_STATIC oal_int32 oal_sdio_suspend(struct device *dev)
         up(&sdio_wake_sema);
         return -OAL_EFAIL;
     }
-
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    pst_wlan_pm = wlan_pm_get_drv();
-    if(pst_wlan_pm && pst_wlan_pm->st_wifi_srv_handler.p_data_wkup_print_en_func)
-    {
-        pst_wlan_pm->st_wifi_srv_handler.p_data_wkup_print_en_func(OAL_TRUE);
-    }
-#endif
-
     DECLARE_DFT_TRACE_KEY_INFO("sdio_android_suspend", OAL_DFT_TRACE_SUCC);
     hi_sdio->ul_sdio_suspend++;
     return OAL_SUCC;

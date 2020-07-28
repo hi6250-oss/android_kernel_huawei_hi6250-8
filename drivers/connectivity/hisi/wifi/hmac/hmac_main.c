@@ -889,9 +889,6 @@ oal_void hmac_register_pm_callback(oal_void)
     if(pst_wifi_srv_handler)
     {
         pst_wifi_srv_handler ->p_wifi_srv_get_pm_pause_func = hmac_get_pm_pause_func;
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-        pst_wifi_srv_handler->p_data_wkup_print_en_func = hmac_print_data_wakeup_en;
-#endif
     }
     else
     {

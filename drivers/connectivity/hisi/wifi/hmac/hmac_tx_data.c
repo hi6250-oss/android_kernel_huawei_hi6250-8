@@ -2043,18 +2043,7 @@ OAL_INLINE oal_uint32  hmac_tx_lan_to_wlan(mac_vap_stru *pst_vap, oal_netbuf_str
 #ifdef _PRE_WLAN_TCP_OPT
     hmac_device_stru    *pst_hmac_device;
     hmac_vap_stru         *pst_hmac_vap;     /* VAP½á¹¹Ìå */
-#endif
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    if(OAL_TRUE==g_uc_print_data_wakeup)
-    {
-        OAL_IO_PRINT(WIFI_WAKESRC_TAG"tx: hmac_parse_packet!\n");
-        hmac_parse_packet(pst_buf);
-        g_uc_print_data_wakeup = OAL_FALSE;
-    }
-#endif
-
-#ifdef _PRE_WLAN_TCP_OPT
     pst_hmac_vap = (hmac_vap_stru *)mac_res_get_hmac_vap(pst_vap->uc_vap_id);
     if (OAL_UNLIKELY(OAL_PTR_NULL == pst_hmac_vap))
     {

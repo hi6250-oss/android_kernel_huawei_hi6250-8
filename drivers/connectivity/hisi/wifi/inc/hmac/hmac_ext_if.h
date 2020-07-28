@@ -372,27 +372,6 @@ typedef struct
     oal_uint8                          mgmt_frame_id;
 }oal_mgmt_tx_stru;
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-extern   oal_uint8   g_uc_print_data_wakeup;
-extern   oal_void    hmac_parse_packet(oal_netbuf_stru *pst_netbuf_eth);
-
-#define WIFI_WAKESRC_TAG "plat:wifi_wake_src,"
-#define IPADDR(addr) \
-        ((oal_uint8*)&addr)[0], \
-        ((oal_uint8*)&addr)[3]
-
-#define IPADDR6(addr) \
-        ntohs((addr).s6_addr16[0]), \
-        ntohs((addr).s6_addr16[7])
-
-#define IPV6_ADDRESS_SIZEINBYTES 0x10
-
-struct ieee8021x_hdr {
-    oal_uint8 version;
-    oal_uint8 type;
-    oal_uint16 length;
-};
-#endif
 
 /*****************************************************************************
   8 UNION∂®“Â
@@ -965,11 +944,6 @@ oal_uint32 hmac_config_vendor_cmd_get_channel_list(mac_vap_stru *pst_mac_vap, oa
 extern oal_uint32  hmac_config_get_ant_info(mac_vap_stru *pst_mac_vap, oal_uint16 us_len, oal_uint8 *puc_param);
 extern oal_uint32  hmac_config_double_ant_switch(mac_vap_stru *pst_mac_vap, oal_uint16 us_len, oal_uint8 *puc_param);
 #endif
-
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-extern  oal_void hmac_print_data_wakeup_en(oal_bool_enum_uint8 uc_en);
-#endif
-
 #ifdef __cplusplus
     #if __cplusplus
         }

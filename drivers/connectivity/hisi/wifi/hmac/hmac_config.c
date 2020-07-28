@@ -355,13 +355,6 @@ oal_uint32  hmac_config_send_event(
 
     HMAC_INIT_SYN_MSG_HDR(pst_syn_msg, en_cfg_id, us_len);
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    if(OAL_TRUE == g_uc_print_data_wakeup)
-    {
-        OAM_WARNING_LOG1(pst_mac_vap->uc_vap_id, OAM_SF_CFG, "{hmac_config_send_event::en_cfg_id[%d].}",en_cfg_id);
-    }
-#endif
-
     /* 填写配置同步消息内容 */
     oal_memcopy(pst_syn_msg->auc_msg_body, puc_param, (oal_uint32)us_len);
 

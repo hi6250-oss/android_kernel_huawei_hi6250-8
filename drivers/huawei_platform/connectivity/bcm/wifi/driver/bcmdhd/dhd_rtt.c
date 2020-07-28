@@ -1198,18 +1198,14 @@ dhd_rtt_stop(dhd_pub_t *dhd, struct ether_addr *mac_list, int mac_cnt)
 	}
 	DHD_RTT(("%s enter\n", __FUNCTION__));
 	mutex_lock(&rtt_status->rtt_mutex);
-
-	if (mac_list) {
-		for (i = 0; i < mac_cnt; i++) {
-			for (j = 0; j < rtt_status->rtt_config.rtt_target_cnt; j++) {
-				if (!bcmp(&mac_list[i], &rtt_status->rtt_config.target_info[j].addr,
-					ETHER_ADDR_LEN)) {
-					rtt_status->rtt_config.target_info[j].disable = TRUE;
-				}
+	for (i = 0; i < mac_cnt; i++) {
+		for (j = 0; j < rtt_status->rtt_config.rtt_target_cnt; j++) {
+			if (!bcmp(&mac_list[i], &rtt_status->rtt_config.target_info[j].addr,
+				ETHER_ADDR_LEN)) {
+				rtt_status->rtt_config.target_info[j].disable = TRUE;
 			}
 		}
 	}
-
 	if (rtt_status->all_cancel) {
 		/* cancel all of request */
 		rtt_status->status = RTT_STOPPED;
@@ -1372,7 +1368,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	/* burst-duration */
 	if (rtt_target->burst_duration) {
 		ftm_params[ftm_param_cnt].data_intvl.intvl =
-			htol32(rtt_target->burst_duration); /* ms */
+			htol32(rtt_target->burst_period); /* ms */
 		ftm_params[ftm_param_cnt].data_intvl.tmu = WL_PROXD_TMU_MILLI_SEC;
 		ftm_params[ftm_param_cnt++].tlvid = WL_PROXD_TLV_ID_BURST_DURATION;
 		DHD_RTT((">\t burst duration : %d ms\n",

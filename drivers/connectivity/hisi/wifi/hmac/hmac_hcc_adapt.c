@@ -46,12 +46,8 @@ OAL_STATIC oal_uint8  g_hcc_flowctrl_stat[FRW_EVENT_TYPE_BUTT];
 OAL_STATIC oal_uint32  g_hcc_sched_event_pkts[FRW_EVENT_TYPE_BUTT]={0};
 OAL_STATIC oal_uint8  g_wlan_queue_to_dmac_queue[WLAN_NET_QUEUE_BUTT];
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
 extern oal_uint32 g_ul_pm_wakeup_event;
 oal_uint32  g_ul_print_wakeup_mgmt = OAL_FALSE;
-oal_uint8   g_uc_print_data_wakeup = OAL_FALSE;
-#endif
-
 
 extern oal_uint32 hmac_hcc_tx_netbuf(frw_event_mem_stru * pst_hcc_event_mem,
                                     oal_netbuf_stru *pst_netbuf,oal_uint32 ul_hdr_len,
@@ -329,13 +325,6 @@ oal_void hmac_adjust_netbuf_data(oal_netbuf_stru *pst_netbuf, mac_tx_ctl_stru *p
     }
 }
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-oal_void hmac_print_data_wakeup_en(oal_bool_enum_uint8 uc_en)
-{
-    g_uc_print_data_wakeup = uc_en;
-}
-#endif
-
 /*****************************************************************************
  函 数 名  : hmac_hcc_tx_netbuf_auto
  功能描述  :
@@ -385,15 +374,6 @@ oal_uint32 hmac_hcc_tx_netbuf_auto(frw_event_mem_stru * pst_hcc_event_mem,
         }
     }
 #endif
-
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    if(OAL_TRUE == g_uc_print_data_wakeup)
-    {
-        OAM_WARNING_LOG2(0, OAM_SF_ANY, "{hmac_hcc_tx_netbuf_auto::Host wkup dev event[%d],subtype[%d]}",en_type,pst_event_hdr->uc_sub_type);
-        g_uc_print_data_wakeup = OAL_FALSE;
-    }
-#endif
-
     return hmac_hcc_tx_netbuf(pst_hcc_event_mem,pst_netbuf,ul_hdr_len,fc_type,queue_id);
 }
 
@@ -1795,7 +1775,6 @@ oal_int32 hmac_rx_wifi_post_action_function(oal_uint8 stype,
     frw_event_task_unlock();
 #endif
 
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
     if(OAL_TRUE == g_ul_pm_wakeup_event)
     {
         g_ul_pm_wakeup_event = OAL_FALSE;
@@ -1804,8 +1783,6 @@ oal_int32 hmac_rx_wifi_post_action_function(oal_uint8 stype,
           g_ul_print_wakeup_mgmt = OAL_TRUE;
         }
     }
-#endif
-
 
     pst_event_mem = FRW_EVENT_ALLOC(OAL_SIZEOF(hcc_event_stru));
     if (NULL == pst_event_mem)

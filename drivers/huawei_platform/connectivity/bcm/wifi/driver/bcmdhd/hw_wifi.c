@@ -51,9 +51,7 @@ volatile bool g_wifi_firstwake = FALSE;
         ((unsigned char*)&addr)[1], \
         ((unsigned char*)&addr)[2], \
         ((unsigned char*)&addr)[3]
-#define IPADDR_IP_ANONYMOUS(addr) \
-        ((unsigned char*)&addr)[0], \
-        ((unsigned char*)&addr)[3]
+
 #define FILTER_ADDR(data) \
 		(((data) >= 1) && ((data) <= 223) && ((data) != 127))
 
@@ -358,7 +356,7 @@ static void parse_ipv4_packet(struct sk_buff *skb)
 	iph = (struct iphdr *)skb->data;
 	iphdr_len = iph->ihl*4;
 
-	HW_PRINT_HI("src ip:%d.**.**.%d, dst ip:%d.**.**.%d\n", IPADDR_IP_ANONYMOUS(iph->saddr), IPADDR_IP_ANONYMOUS(iph->daddr));
+	HW_PRINT_HI("src ip:%d.%d.%d.%d, dst ip:%d.%d.%d.%d\n", IPADDR(iph->saddr), IPADDR(iph->daddr));
 #ifdef CONFIG_HUAWEI_DUBAI
 	if (FILTER_ADDR(((unsigned char*)&iph->saddr)[0]) &&
 		FILTER_ADDR(((unsigned char*)&iph->daddr)[0])) {
@@ -811,15 +809,15 @@ static void hw_parse_special_dhcp_packet(uint8_t *buff, uint32_t buflen, uint8_t
     if (type == DHCP_DISCOVER) {
         HW_PRINT_HI("%s: type: DHCP_DISCOVER\n", __func__);
     } else if (type == DHCP_OFFER) {
-        HW_PRINT_HI("%s: type: DHCP_OFFER, ip:%d.**.**.%d srvip:%d.**.**.%d MAC:" HWMACSTR "\n",
-                __func__, IPADDR_IP_ANONYMOUS(msg->yiaddr), IPADDR_IP_ANONYMOUS(msg->siaddr), HWMAC2STR(dst));
+        HW_PRINT_HI("%s: type: DHCP_OFFER, ip:%d.%d.%d.%d srvip:%d.%d.%d.%d MAC:" HWMACSTR "\n",
+                __func__, IPADDR(msg->yiaddr), IPADDR(msg->siaddr), HWMAC2STR(dst));
     } else if (type == DHCP_REQUEST) {
         hw_dhcp_get_option_uint32(&req_ip, msg->options, len, DHO_IPADDRESS);
         hw_dhcp_get_option_uint32(&req_srv, msg->options, len, DHO_SERVERID);
         req_ip = ntoh32(req_ip);
         req_srv = ntoh32(req_srv);
-        HW_PRINT_HI("%s: type: DHCP_REQUEST, ip:%d.**.**.%d srvip:%d.**.**.%d\n",
-                __func__, IPADDR_IP_ANONYMOUS(req_ip), IPADDR_IP_ANONYMOUS(req_srv));
+        HW_PRINT_HI("%s: type: DHCP_REQUEST, ip:%d.%d.%d.%d srvip:%d.%d.%d.%d\n",
+                __func__, IPADDR(req_ip), IPADDR(req_srv));
     } else if (type == DHCP_ACK) {
         HW_PRINT_HI("%s: type: DHCP_ACK MAC:" HWMACSTR "\n", __func__, HWMAC2STR(dst));
     } else if (type == DHCP_NAK) {

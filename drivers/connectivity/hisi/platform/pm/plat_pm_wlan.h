@@ -61,16 +61,10 @@ enum WLAN_PM_SLEEP_STAGE
   3 STRUCT DEFINE
 *****************************************************************************/
 typedef oal_uint32 (*wifi_srv_get_pm_pause_func)(oal_void);
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-typedef oal_void (*wifi_srv_data_wkup_print_en_func)(oal_bool_enum_uint8);
-#endif
 
 struct wifi_srv_callback_handler
 {
     wifi_srv_get_pm_pause_func p_wifi_srv_get_pm_pause_func;
-#ifdef _PRE_WLAN_WAKEUP_SRC_PARSE
-    wifi_srv_data_wkup_print_en_func     p_data_wkup_print_en_func;
-#endif
 };
 
 

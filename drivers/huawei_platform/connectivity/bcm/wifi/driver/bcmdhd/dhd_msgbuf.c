@@ -2580,7 +2580,7 @@ dhd_prot_packet_get(dhd_pub_t *dhd, uint32 pktid, uint8 pkttype, bool free_pktid
 {
 	void *PKTBUF;
 	dmaaddr_t pa;
-	uint32 len = 0;
+	uint32 len;
 	void *dmah;
 	void *secdma;
 
@@ -3420,7 +3420,7 @@ dhd_prot_txstatus_process(dhd_pub_t *dhd, void *msg)
 	uint32 pktid;
 	void *pkt = NULL;
 	dmaaddr_t pa;
-	uint32 len = 0;
+	uint32 len;
 	void *dmah;
 	void *secdma;
 #ifdef DEVICE_TX_STUCK_DETECT

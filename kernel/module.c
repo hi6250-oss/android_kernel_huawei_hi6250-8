@@ -62,13 +62,26 @@
 #include <uapi/linux/module.h>
 #include "module-internal.h"
 
+#include <linux/arm-smccc.h>
+#include <linux/of.h>
+
+#ifdef CONFIG_MODULE_SIG
+#include <huawei_platform/log/imonitor.h>
+#define ITEM_INFO_LEN 1024
+#define STP_ACTIVE_THREAT_INFO 940001001
+#define STP_MODSIG_ID 0x00000102
+#endif /* !CONFIG_MODULE_SIG */
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/module.h>
 
 #ifndef ARCH_SHF_SMALL
 #define ARCH_SHF_SMALL 0
 #endif
-
+#ifdef CONFIG_HISI_HHEE
+#include <linux/hisi/hisi_hhee.h>
+static unsigned long clarify_token;
+#endif
 /*
  * Modules' sections will be aligned on page boundaries
  * to ensure complete separation of code and data, but
@@ -100,7 +113,12 @@
  * (delete and add uses RCU list operations). */
 DEFINE_MUTEX(module_mutex);
 EXPORT_SYMBOL_GPL(module_mutex);
+#ifdef CONFIG_KERNELDUMP_KO_DBG
+LIST_HEAD(modules);
+EXPORT_SYMBOL_GPL(modules);
+#else
 static LIST_HEAD(modules);
+#endif
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 
@@ -1894,6 +1912,9 @@ static void set_section_ro_nx(void *base,
 	/* begin and end PFNs of the current subsection */
 	unsigned long begin_pfn;
 	unsigned long end_pfn;
+#ifdef CONFIG_HISI_HHEE
+	struct arm_smccc_res res;
+#endif
 
 	/*
 	 * Set RO for module text and RO-data:
@@ -1914,6 +1935,12 @@ static void set_section_ro_nx(void *base,
 		if (end_pfn > begin_pfn)
 			set_memory_nx(begin_pfn << PAGE_SHIFT, end_pfn - begin_pfn);
 	}
+#ifdef CONFIG_HISI_HHEE
+	if(HHEE_ENABLE == hhee_check_enable())
+		arm_smccc_hvc( HHEE_LKM_UPDATE, (unsigned long)base, text_size,
+			clarify_token, 0, 0, 0, 0, &res);
+#endif
+
 }
 
 static void unset_module_core_ro_nx(struct module *mod)
@@ -2606,6 +2633,30 @@ static inline void kmemleak_load_module(const struct module *mod,
 #endif
 
 #ifdef CONFIG_MODULE_SIG
+static void modsig_do_upload_log(void)
+{
+	char info[ITEM_INFO_LEN] = {0};
+	int ret = 0;
+
+	struct imonitor_eventobj *obj = imonitor_create_eventobj(STP_ACTIVE_THREAT_INFO);
+	if (!obj)
+	{
+		return;
+	}
+	(void)snprintf(info, ITEM_INFO_LEN, "name:mod-sign");
+	ret += imonitor_set_param(obj, E940001001_ID_INT, STP_MODSIG_ID);
+	ret += imonitor_set_param(obj, E940001001_VER_TINYINT, 0);
+	ret += imonitor_set_param(obj, E940001001_INFO_VARCHAR, (long)info);
+	if (ret)
+	{
+		imonitor_destroy_eventobj(obj);
+		return;
+	}
+	(void)imonitor_send_event(obj);
+	imonitor_destroy_eventobj(obj);
+	return;
+}
+
 static int module_sig_check(struct load_info *info, int flags)
 {
 	int err = -ENOKEY;
@@ -2628,6 +2679,8 @@ static int module_sig_check(struct load_info *info, int flags)
 		info->sig_ok = true;
 		return 0;
 	}
+
+	modsig_do_upload_log();
 
 	/* Not having a signature is only an error if we're strict. */
 	if (err == -ENOKEY && !sig_enforce)
@@ -3989,6 +4042,21 @@ static int __init proc_modules_init(void)
 	return 0;
 }
 module_init(proc_modules_init);
+#endif
+
+#ifdef CONFIG_HISI_HHEE
+static int __init module_token_init(void)
+{
+
+	struct arm_smccc_res res;
+	if(HHEE_ENABLE == hhee_check_enable()){
+		arm_smccc_hvc(HHEE_HVC_TOKEN, 0, 0,
+			0, 0, 0, 0, 0, &res);
+		clarify_token = res.a1;
+	}
+	return 0;
+}
+module_init(module_token_init);
 #endif
 
 /* Given an address, look for it in the module exception tables. */

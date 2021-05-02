@@ -30,6 +30,7 @@
 #include <linux/netdevice.h>
 #include <linux/net.h>
 #include <linux/udp.h>
+#include <net/udp.h>
 #include <linux/ppp_defs.h>
 #include <linux/if_ppp.h>
 #include <linux/if_pppox.h>
@@ -206,7 +207,9 @@ static void pppolac_xmit_core(struct work_struct *delivery_work)
 	while ((skb = skb_dequeue(&delivery_queue))) {
 		struct sock *sk_udp = skb->sk;
 		struct kvec iov = {.iov_base = skb->data, .iov_len = skb->len};
-		struct msghdr msg = { 0 };
+		struct msghdr msg = {
+			.msg_flags = MSG_NOSIGNAL | MSG_DONTWAIT,
+		};
 
 		iov_iter_kvec(&msg.msg_iter, WRITE | ITER_KVEC, &iov, 1,
 			      skb->len);
@@ -321,6 +324,7 @@ static int pppolac_connect(struct socket *sock, struct sockaddr *useraddr,
 
 	sk->sk_state = PPPOX_CONNECTED;
 	udp_sk(sk_udp)->encap_type = UDP_ENCAP_L2TPINUDP;
+	udp_encap_enable();
 	udp_sk(sk_udp)->encap_rcv = pppolac_recv;
 	sk_udp->sk_backlog_rcv = pppolac_recv_core;
 	sk_udp->sk_user_data = sk;

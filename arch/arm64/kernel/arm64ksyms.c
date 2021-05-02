@@ -40,6 +40,7 @@ EXPORT_SYMBOL(__copy_in_user);
 
 	/* physical memory */
 EXPORT_SYMBOL(memstart_addr);
+EXPORT_SYMBOL(phystart_addr);
 
 	/* string / mem functions */
 EXPORT_SYMBOL(strchr);

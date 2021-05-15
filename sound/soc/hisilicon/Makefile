@@ -1,4 +1,4 @@
-subdir-ccflags-y += -Wall -Werror
+subdir-ccflags-y += -Wall # -Werror
 
 ifeq ($(CONFIG_HIFI_MAILBOX), y)
 EXTRA_CFLAGS += -I$(srctree)/drivers/hisi/hifi_mailbox/mailbox

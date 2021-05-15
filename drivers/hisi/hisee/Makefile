@@ -2,7 +2,7 @@ EXTRA_CFLAGS 	+= -Idrivers/hisi/mntn/blackbox/platform_lpm3
 #LOCAL_C_INCLUDES += vendor/huawei/chipset_common/modules/libc_sec/include
 #LOCAL_CFLAGS += -Ivendor/huawei/chipset_common/modules/libc_sec/include
 
-subdir-ccflags-y              += -Wall -Werror
+subdir-ccflags-y              += -Wall # -Werror
 
 ifeq ($(TARGET_BOARD_PLATFORM), hi3660)
 EXTRA_CFLAGS += -DHISEE_POWER_MANAGE_COUNT

@@ -7,4 +7,4 @@ obj-$(CONFIG_BALONG_MODEM_RESET_TEST)   += reset_balong_test.o
 EXTRA_CFLAGS += -Idrivers/hisi/tzdriver \
                 -Idrivers/tzdriver
 
-subdir-ccflags-y := -Werror
+#subdir-ccflags-y := -Werror

@@ -1,5 +1,5 @@
 # slimbus driver
-subdir-ccflags-y += -Wall -Werror
+subdir-ccflags-y += -Wall # -Werror
 ccflags-y += -Idrivers/devkit/audiokit/
 
 EXTRA_CFLAGS += -Idrivers/hisi/slimbus/vendor/candance/include

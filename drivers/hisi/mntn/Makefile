@@ -1,4 +1,4 @@
-ccflags-y += -I$(srctree)/drivers/hisi/secure_boot/inc -Wall -Werror
+ccflags-y += -I$(srctree)/drivers/hisi/secure_boot/inc -Wall # -Werror
 
 obj-$(CONFIG_HISILICON_PLATFORM_MAINTAIN)	+= hisilicon_platform_mntn.o
 obj-$(CONFIG_HISILICON_PLATFORM_HISI_EASYSHELL)	+= hisi-easy-shell.o

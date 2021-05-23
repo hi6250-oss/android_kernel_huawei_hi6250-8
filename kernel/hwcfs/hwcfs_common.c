@@ -236,7 +236,7 @@ void dynamic_vip_enqueue(struct task_struct *task, int type, int depth)
 	__dynamic_vip_enqueue(task, type, depth);
 }
 
-inline bool test_task_vip(struct task_struct *task)
+bool test_task_vip(struct task_struct *task)
 {
 	return task && (task->static_vip || atomic64_read(&task->dynamic_vip));
 }
@@ -246,7 +246,7 @@ inline bool test_task_vip_depth(int vip_depth)
 	return vip_depth < VIP_DEPTH_MAX;
 }
 
-inline bool test_set_dynamic_vip(struct task_struct *tsk)
+bool test_set_dynamic_vip(struct task_struct *tsk)
 {
 	return test_task_vip(tsk) && test_task_vip_depth(tsk->vip_depth);
 }

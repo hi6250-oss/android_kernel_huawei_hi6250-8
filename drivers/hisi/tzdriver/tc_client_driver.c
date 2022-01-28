@@ -2858,16 +2858,11 @@ static long tc_client_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 static int tc_client_open(struct inode *inode, struct file *file)
 {
 	int ret = TEEC_ERROR_GENERIC;
-	int type = INVALID_TYPE;
+	int type = TEECD_CONNECT; // Assume the caller is always TEECD_CONNECT and not
 	TC_NS_DEV_File *dev = NULL;
 	bool illegal_type = false;
 	bool teecd_enable = false;
 	bool system_teecd_enable = false;
-
-	if (check_teecd_access(current, &type)) {
-		TCERR(KERN_ERR "tc_client_open ca verification failed\n");
-		return -EPERM;
-	}
 
 	illegal_type = (TEECD_CONNECT != type && SYSTEM_TEECD_CONNECT != type);
 	if (illegal_type) {

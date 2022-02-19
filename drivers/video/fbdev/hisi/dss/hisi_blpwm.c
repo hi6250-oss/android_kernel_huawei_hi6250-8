@@ -24,8 +24,6 @@
 
 
 
-#include <chipset_common/dubai/dubai.h>
-
 /* default pwm clk */
 #define DEFAULT_PWM_CLK_RATE	(120 * 1000000L)
 static char __iomem *hisifd_blpwm_base;
@@ -273,9 +271,6 @@ static void update_backlight(struct hisi_fb_data_type *hisifd, uint32_t backligh
 		HISI_FB_ERR("blpwm_base is null!\n");
 		return;
 	}
-
-	/* notify dubai module to update brightness */
-	dubai_update_brightness(backlight);
 
 	if ((g_bl_info.bl_ic_ctrl_mode >= REG_ONLY_MODE ) && (g_bl_info.bl_ic_ctrl_mode <= I2C_ONLY_MODE)) {
 		bl_level = backlight;
@@ -1025,9 +1020,6 @@ void hisi_blpwm_fill_light(uint32_t backlight)
 
 	down(&g_bl_info.bl_semaphore);
 
-	/* notify dubai module to update brightness */
-	dubai_update_brightness(backlight);
-
 	HISI_FB_DEBUG("hisi_blpwm_fill_light:bl_level=%d, backlight=%d, blpwm_out_precision=%d, bl_max=%d\n",
 			bl_level, backlight, g_bl_info.blpwm_out_precision, g_bl_info.bl_max);
 
@@ -1111,9 +1103,6 @@ int hisi_blpwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level
 				g_bl_info.ap_brightness, g_bl_info.current_cabc_pwm,
 				pinfo->blpwm_input_precision, bl_level);
 	}
-
-	/* notify dubai module to update brightness */
-	dubai_update_brightness(bl_level);
 
 	if ((g_bl_info.bl_ic_ctrl_mode >= REG_ONLY_MODE ) && (g_bl_info.bl_ic_ctrl_mode <= I2C_ONLY_MODE)) {
 		bl_level = bl_lvl_map(bl_level);

@@ -491,6 +491,7 @@ struct mipi_panel_info {
 	uint32_t burst_mode;
 	uint32_t max_tx_esc_clk;
 	uint8_t non_continue_en;
+	uint8_t hs_clk_disable_delay; /* for emui 8 lcdkit */
 	uint8_t txoff_rxulps_en;
 
 	uint32_t dsi_bit_clk_val1;

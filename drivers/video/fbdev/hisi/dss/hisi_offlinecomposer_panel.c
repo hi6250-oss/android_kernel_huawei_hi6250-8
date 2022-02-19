@@ -135,7 +135,7 @@ static int hisi_offlinecompser_probe(struct platform_device *pdev)
 	ret = platform_device_add_data(pdev, &hisi_offlinecomposer_panel_data,
 		sizeof(struct hisi_fb_panel_data));
 	if (ret) {
-		HISI_FB_ERR("platform_device_add_data failed!\n");
+		dev_err(&pdev->dev, "platform_device_add_data failed!\n");
 		goto err_device_put;
 	}
 

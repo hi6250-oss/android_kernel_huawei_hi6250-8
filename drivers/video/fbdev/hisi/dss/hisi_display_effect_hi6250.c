@@ -23,8 +23,8 @@ static bool g_is_ce_service_init = false;
 static spinlock_t g_ce_service_lock;
 static ce_service_t g_ce_services[CE_SERVICE_LIMIT];
 
-int g_enable_effect = 0;
-int g_debug_effect = 0;
+uint32_t g_enable_effect = 0;
+uint32_t g_debug_effect = 0;
 
 extern int g_dss_effect_ce_en;
 
@@ -48,7 +48,7 @@ static void hisifb_ce_service_deinit(void);
 	}																						\
 }			/*lint -restore */																\
 
-static inline ce_service_t *get_available_service(ce_service_status status)
+static inline ce_service_t *get_available_service(ce_service_status status, int* index)
 {
 	int i = 0;
 	ce_service_t *service = NULL;
@@ -58,6 +58,7 @@ static inline ce_service_t *get_available_service(ce_service_status status)
 		if (g_ce_services[i].status == status) {
 			g_ce_services[i].status = (ce_service_status)(g_ce_services[i].status + 1) % CE_SERVICE_STATUS_COUNT;
 			service = &g_ce_services[i];
+			*index = i;
 			break;
 		}
 	}
@@ -77,7 +78,8 @@ int do_contrast(dss_ce_info_t * info)
 	}
 
 	if (g_is_ce_service_init) {
-		ce_service_t *service = get_available_service(CE_SERVICE_HIST_REQ);
+		int i = 0;
+		ce_service_t *service = get_available_service(CE_SERVICE_HIST_REQ, &i);
 
 		if (service) {
 			service->ce_info = info;
@@ -99,6 +101,11 @@ int do_contrast(dss_ce_info_t * info)
 
 void hisi_effect_init(struct hisi_fb_data_type *hisifd)
 {
+	if(hisifd == NULL){
+		HISI_FB_ERR("[effect] hisifd is null pointer \n");
+		return;
+	}
+
 	spin_lock_init(&g_ce_service_lock);
 	if (!g_is_effect_lock_init) {
 		spin_lock_init(&g_xcc_effect_lock);
@@ -113,6 +120,11 @@ void hisi_effect_init(struct hisi_fb_data_type *hisifd)
 
 void hisi_effect_deinit(struct hisi_fb_data_type *hisifd)
 {
+	if(hisifd == NULL){
+		HISI_FB_ERR("[effect] hisifd is null pointer \n");
+		return;
+	}
+
 	mutex_destroy(&(hisifd->al_ctrl.ctrl_lock));
 	mutex_destroy(&(hisifd->ce_ctrl.ctrl_lock));
 	mutex_destroy(&(hisifd->bl_ctrl.ctrl_lock));
@@ -257,7 +269,8 @@ int hisifb_ce_service_get_hist(struct fb_info *info, void __user *argp)
 {
 	struct hisi_fb_data_type *hisifd = NULL;
 	ce_parameter_t param;
-	ce_service_t *service = get_available_service(CE_SERVICE_IDLE);
+	int service_index = 0;
+	ce_service_t *service = get_available_service(CE_SERVICE_IDLE, &service_index);
 	int ret = 0;
 
 	if (NULL == info) {
@@ -268,6 +281,11 @@ int hisifb_ce_service_get_hist(struct fb_info *info, void __user *argp)
 	hisifd = (struct hisi_fb_data_type *)info->par;
 	if (NULL == hisifd) {
 		HISI_FB_ERR("NULL Pointer\n");
+		return -EINVAL;
+	}
+
+	if (hisifd->index != PRIMARY_PANEL_IDX) {
+		HISI_FB_ERR("fb%d is not supported!\n", hisifd->index);
 		return -EINVAL;
 	}
 
@@ -296,7 +314,7 @@ int hisifb_ce_service_get_hist(struct fb_info *info, void __user *argp)
 	ce_service_wait_event(service->wq_hist, service->ce_info || !g_is_ce_service_init);
 	lock_fb_info(info);
 	if (service->ce_info) {
-		param.service = service;
+		param.service = (void*)service_index;
 		param.width = service->ce_info->width;
 		param.height = service->ce_info->height;
 		param.hist_mode = service->ce_info->hist_mode;
@@ -325,13 +343,13 @@ int hisifb_ce_service_get_hist(struct fb_info *info, void __user *argp)
 	return ret;
 }
 
-int hisifb_ce_service_set_lut(struct fb_info *info, void __user *argp)
+int hisifb_ce_service_set_lut(struct fb_info *info, const void __user *argp)
 {
 	ce_parameter_t param;
 	ce_service_t *service = NULL;
 	dss_ce_info_t *ce_info = NULL;
+	int service_index = -1;
 	int ret = 0;
-	int i = 0;
 
 	if (NULL == argp) {
 		HISI_FB_ERR("NULL Pointer\n");
@@ -343,25 +361,14 @@ int hisifb_ce_service_set_lut(struct fb_info *info, void __user *argp)
 		HISI_FB_ERR("copy_from_user(param) failed! ret=%d.\n", ret);
 		return -2;
 	}
+	service_index = (int)param.service;
 
-	if ((param.width < 16) || (param.width > 4096) || (param.height < 16) || (param.height > 4096)) {
-		HISI_FB_ERR("width:%d height:%d, the size is not supported, please check it!!\n", param.width, param.height);
+	if ((param.width < 16) || (param.width > 4096) || (param.height < 16) || (param.height > 4096) || service_index < 0 || service_index >= CE_SERVICE_LIMIT) {
+		HISI_FB_ERR("width:%d height:%d the size or index:%d is not supported, please check it!!\n", param.width, param.height, service_index);
 		return -1;
 	}
 
-	service = (ce_service_t *)param.service;
-
-	for (i = 0; i < CE_SERVICE_LIMIT; i++ ) {
-		if (service == &g_ce_services[i]) {
-			break;
-		}
-	}
-
-	if (i >= CE_SERVICE_LIMIT) {
-		HISI_FB_ERR("service is not corrtct\n");
-		return -1;
-	}
-
+	service = &g_ce_services[service_index];
 	ce_info = service->ce_info;
 	if (ce_info == NULL) {
 		HISI_FB_INFO("ce_info is NULL, panel maybe power down last time.\n");
@@ -560,12 +567,25 @@ void hisifb_display_effect_func_switch(struct hisi_fb_data_type *hisifd, const c
 
 bool hisifb_display_effect_is_need_ace(struct hisi_fb_data_type *hisifd)
 {
+	if(hisifd == NULL){
+		HISI_FB_ERR("[effect] hisifd is null pointer \n");
+		return false;
+	}
+
 	return hisifd->ce_ctrl.ctrl_ce_mode != CE_MODE_DISABLE;
 }
 
 bool hisifb_display_effect_is_need_blc(struct hisi_fb_data_type *hisifd)
 {
 	(void)hisifd;
+	return false;
+}
+
+bool hisifb_display_effect_check_bl_value(int curr, int last) {
+	return false;
+}
+
+bool hisifb_display_effect_check_bl_delta(int curr, int last) {
 	return false;
 }
 
@@ -778,11 +798,11 @@ void hisi_dpp_ace_end_handle_func(struct work_struct *work)
 
 	ce_info->new_hist_rpt = true;
 }
-int hisifb_ce_service_enable_hiace(struct fb_info *info, void __user *argp) {
+int hisifb_ce_service_enable_hiace(struct fb_info *info, const void __user *argp) {
 	(void)info, (void)argp;
 	return 0;
 }
-int hisifb_ce_service_set_param(struct fb_info *info, void __user *argp) {
+int hisifb_ce_service_set_param(struct fb_info *info, const void __user *argp) {
 	(void)info, (void)argp;
 	return 0;
 }
@@ -926,6 +946,11 @@ static void hisi_effect_kfree(uint32_t **free_table)
 
 static void free_lcp_table(struct lcp_info *lcp)
 {
+	if(lcp == NULL){
+		HISI_FB_ERR("lcp is null pointer \n");
+		return;
+	}
+
 	hisi_effect_kfree(&lcp->gmp_table_low32);
 	hisi_effect_kfree(&lcp->gmp_table_high4);
 	hisi_effect_kfree(&lcp->igm_r_table);

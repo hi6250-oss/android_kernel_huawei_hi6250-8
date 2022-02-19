@@ -65,10 +65,14 @@
 #include <linux/file.h>
 #include <linux/dma-buf.h>
 #include <linux/genalloc.h>
-#include <linux/hisi/hisi-iommu.h>
+#include <linux/hisi-iommu.h>
+
+#include <linux/atomic.h>
+
 /*lint +e551 +e551*/
 //#include <linux/huawei/hisi_irq_affinity.h>
-
+#include "hisi_dss_ion.h"
+#include "hisi_dss_iommu.h"
 #include "hisi_fb_def.h"
 #include "hisi_fb_panel.h"
 #include "hisi_fb_debug.h"
@@ -86,11 +90,25 @@
 #include "hisi_overlay_utils_hi3660.h"
 #elif defined(CONFIG_HISI_FB_970)
 #include "hisi_overlay_utils_kirin970.h"
+#elif defined(CONFIG_HISI_FB_V501)
+#include "hisi_overlay_utils_dssv501.h"
+#include "hisi_dpe_pipe_clk_utils.h"
+#elif defined(CONFIG_HISI_FB_V320)
+#include "hisi_overlay_utils_dssv320.h"
+#elif defined(CONFIG_HISI_FB_V510)
+#include "hisi_overlay_utils_dssv510.h"
+#elif defined(CONFIG_HISI_FB_V330)
+#include "hisi_overlay_utils_dssv330.h"
 #endif
 
 #include "hisi_dpe_utils.h"
 #include "hisi_overlay_utils.h"
+#include "hisi_fb_video_idle.h"
+#include "hisi_ovl_online_wb.h"
+#include "hisi_dss_sync.h"
 
+/*
+#ifndef CONFIG_SYNC_FILE
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
 #include "sync.h"
 #include "sw_sync.h"
@@ -98,7 +116,8 @@
 #include <linux/sync.h>
 #include <linux/sw_sync.h>
 #endif
-
+#endif
+*/
 
 //#define CONFIG_HISI_FB_COLORBAR_USED
 //#define CONFIG_HISI_FB_DPP_COLORBAR_USED
@@ -107,13 +126,11 @@
 //#define CONFIG_FPGA_SDP_TEST
 
 #define CONFIG_HISI_FB_BACKLIGHT_DELAY
-//#define CONFIG_HISI_FB_HEAP_CARVEOUT_USED
 //#define CONFIG_FB_DEBUG_USED
 
 #define CONFIG_BACKLIGHT_2048
 
-#define HISI_DSS_COMPOSER_HOLD_TIME	(1000 * 3600 * 24 * 7)
-
+#define HISI_DSS_COMPOSER_HOLD_TIME	(1000 * 3600 * 24 * 5)
 
 #define HISI_FB0_NUM	(3)
 #define HISI_FB1_NUM	(0)
@@ -127,9 +144,14 @@
 
 #define HISI_DSS_OFFLINE_MAX_NUM	(2)
 #define HISI_DSS_OFFLINE_MAX_LIST	(128)
+#define ONLINE_PLAY_LOG_PRINTF   (10)
+#define BACKLIGHT_LOG_PRINTF   (16)
+
 
 //esd check period-->5000ms
 #define ESD_CHECK_TIME_PERIOD	(5000)
+
+#define DSM_CREATE_FENCE_FAIL_EXPIRE_COUNT (6)
 
 struct hisifb_vsync {
 	wait_queue_head_t vsync_wait;
@@ -137,6 +159,7 @@ struct hisifb_vsync {
 	ktime_t vsync_timestamp_prev;
 	ktime_t vactive_timestamp;
 	int vsync_created;
+	/* flag for soft vsync signal synchronizing with TE*/
 	int vsync_enabled;
 	int vsync_infinite;
 	int vsync_infinite_count;
@@ -181,6 +204,8 @@ enum bl_control_mode {
 	I2C_ONLY_MODE = 6,
 	BLPWM_AND_CABC_MODE,
 	COMMON_IC_MODE = 8,
+	AMOLED_NO_BL_IC_MODE = 9,
+	BLPWM_MODE = 10,
 };
 
 enum ESD_RECOVER_STATE {
@@ -204,7 +229,7 @@ struct hisifb_secure {
 	void (*secure_layer_deconfig) (struct hisi_fb_data_type *hisifd, int32_t chn_idx);
 	void (*notify_secure_switch) (struct hisi_fb_data_type *hisifd);
 	void (*set_reg) (uint32_t addr, uint32_t val, uint8_t bw, uint8_t bs);
-#if defined(CONFIG_HISI_FB_970)
+#if defined(CONFIG_HISI_FB_970) || defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510)
 	void (*hdcp13_enable)(uint32_t en);
 	void (*hdcp22_enable)(uint32_t en);
 	void (*hdcp13_encrypt_enable)(uint32_t en);
@@ -233,6 +258,7 @@ enum {
 
 typedef struct mdc_chn_info {
 	unsigned int status;
+	unsigned int drm_used;
 	unsigned int cap_available;
 	unsigned int rch_idx;
 	unsigned int wch_idx;
@@ -255,13 +281,13 @@ typedef struct mdc_func_ops {
 
 int hisi_mdc_resource_init(struct hisi_fb_data_type *hisifd, unsigned int platform);
 int hisi_mdc_chn_request(struct fb_info *info, void __user *argp);
-int hisi_mdc_chn_release(struct fb_info *info, void __user *argp);
+int hisi_mdc_chn_release(struct fb_info *info, const void __user *argp);
 
-#if defined (CONFIG_HISI_FB_970)
+#if defined (CONFIG_HISI_FB_970) || defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510)
 #define MDC_RCHN_V  (DSS_RCHN_V0)
 #define MDC_WCHN_W  (DSS_WCHN_W1)
 #define MDC_OVL  (DSS_OVL3)
-int hisi_mdc_power_ctrl(struct fb_info *info, void __user *argp);
+int hisi_mdc_power_ctrl(struct fb_info *info, const void __user *argp);
 void hisi_mdc_mif_on(struct hisi_fb_data_type *hisifd);
 int hisi_mdc_scl_coef_on(struct hisi_fb_data_type *hisifd, bool enable_cmdlist, int coef_lut_idx);
 int hisi_ov_media_common_play(struct hisi_fb_data_type *hisifd, void __user *argp);
@@ -278,9 +304,35 @@ struct hisifb_esd {
 	struct hisi_fb_data_type *hisifd;
 };
 
+struct hisifb_pipe_clk {
+	uint64_t pxl0_ppll_rate;//need config in panel init.
+	uint64_t pipe_clk_rate;
+	uint32_t pipe_clk_updt_hporch[3];
+	uint32_t fps_updt_hporch[3];
+	uint32_t hporch_pre_set[3];
+	uint32_t pipe_clk_rate_div;
+	uint32_t div_pre_set;
+	uint8_t  pipe_clk_updt_state;
+	uint8_t  pipe_clk_updt_times;
+	uint8_t inited;
+	uint8_t underflow_int;
+	uint8_t dirty_region_updt_disable;
+	uint8_t fullhdplus;
+	uint8_t reserved[2];
+
+	struct workqueue_struct *pipe_clk_handle_wq;
+	struct work_struct pipe_clk_handle_work;
+	struct hisi_fb_data_type *hisifd;
+};
+
 struct hisifb_buf_sync {
-	struct sw_sync_timeline *timeline;
+	char *fence_name;
+	struct hisi_dss_timeline *timeline;
+	struct hisi_dss_timeline *timeline_retire;
+
 	int timeline_max;
+	int threshold;
+	int retire_threshold;
 	int refresh;
 	spinlock_t refresh_lock;
 
@@ -289,10 +341,15 @@ struct hisifb_buf_sync {
 	struct list_head layerbuf_list;
 	bool layerbuf_flushed;
 	spinlock_t layerbuf_spinlock;
+	struct semaphore layerbuf_sem;
 };
 
 struct hisifb_layerbuf {
-	struct ion_handle *ion_handle;
+#if CONFIG_ION_ALLOC_BUFFER
+	struct ion_handle *buffer_handle;
+#else
+	struct dma_buf *buffer_handle;
+#endif
 	struct list_head list_node;
 	int timeline;
 	bool has_map_iommu;
@@ -315,8 +372,8 @@ struct hisifb_backlight {
 
 	struct workqueue_struct *sbl_queue;
 	struct work_struct sbl_work;
+	ktime_t bl_timestamp;
 };
-
 
 struct hisi_fb_data_type {
 	uint32_t index;
@@ -334,9 +391,10 @@ struct hisi_fb_data_type {
 	char __iomem *pmctrl_base;
 
 	char __iomem *media_crg_base;
-	char __iomem *media_crg_es_base;
 	char __iomem *media_common_base;
 	char __iomem *dp_base;
+	char __iomem *mmc0_crg;
+	char __iomem *dp_phy_base;
 
 	char __iomem *mmbuf_asc0_base;
 	char __iomem *mipi_dsi0_base;
@@ -395,17 +453,28 @@ struct hisi_fb_data_type {
 	bool fb_shutdown;
 	bool need_tuning_clk;
 	bool lcd_self_testing;
+	bool enable_fast_unblank;
 	unsigned int aod_function;
 	unsigned int aod_mode;
 	unsigned int vr_mode;
+	unsigned int mask_layer_xcc_flag;
+	atomic_t atomic_v;
 
 	struct semaphore blank_sem;
 	struct semaphore blank_sem0;
+	struct semaphore blank_sem_effect;
 	struct semaphore brightness_esd_sem;
+	struct semaphore power_sem;
 	struct semaphore offline_composer_sr_sem;
-#if defined(CONFIG_HISI_FB_3660)
+	struct semaphore fast_unblank_sem;
+#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_V320)
 	struct semaphore hiace_clear_sem;
 #endif
+#if defined (CONFIG_HISI_FB_V320) || defined (CONFIG_HISI_FB_970) || defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510)
+	struct semaphore hiace_hist_lock_sem;
+	struct semaphore dp_vote_sem;
+#endif
+
 	uint32_t offline_composer_sr_refcount;
 
 	void (*sysfs_attrs_append_fnc) (struct hisi_fb_data_type *hisifd, struct attribute *attr);
@@ -434,6 +503,7 @@ struct hisi_fb_data_type {
 	void (*debug_register) (struct platform_device *pdev);
 	void (*debug_unregister) (struct platform_device *pdev);
 	int (*cabc_update) (struct hisi_fb_data_type *hisifd);
+	void (*pipe_clk_updt_isr_handler) (struct hisi_fb_data_type *hisifd);
 
 	bool (*set_fastboot_fnc) (struct fb_info *info);
 	int (*open_sub_fnc) (struct fb_info *info);
@@ -448,6 +518,7 @@ struct hisi_fb_data_type {
 	void (*sbl_isr_handler)(struct hisi_fb_data_type *hisifd);
 	int (*fps_upt_isr_handler) (struct hisi_fb_data_type *hisifd);
 	int (*mipi_dsi_bit_clk_upt_isr_handler) (struct hisi_fb_data_type *hisifd);
+	void (*panel_mode_switch_isr_handler) (struct hisi_fb_data_type *hisifd, uint8_t mode_switch_to);
 	void (*crc_isr_handler)(struct hisi_fb_data_type *hisifd);
 	void (*ov_ldi_underflow_isr_handle)(struct hisi_fb_data_type *hisifd);
 
@@ -467,16 +538,27 @@ struct hisi_fb_data_type {
 
 	int (*dp_device_srs)(struct hisi_fb_data_type *hisifd, bool blank);
 	int (*dp_get_color_bit_mode) (struct hisi_fb_data_type *hisifd, void __user *argp);
+	int (*dp_get_source_mode) (struct hisi_fb_data_type *hisifd, void __user *argp);
 	int (*dp_pxl_ppll7_init)(struct hisi_fb_data_type *hisifd, u64 pixel_clock);
+
+	void (*video_idle_ctrl_register) (struct platform_device *pdev);
+	void (*video_idle_ctrl_unregister) (struct platform_device *pdev);
+
+	void (*overlay_online_wb_register) (struct platform_device *pdev);
+	void (*overlay_online_wb_unregister) (struct platform_device *pdev);
+
 	int (*dp_wakeup)(struct hisi_fb_data_type *hisifd);
+
+	int (*panel_set_display_region) (struct hisi_fb_data_type *hisifd, void __user *argp);
 
 	struct hisifb_backlight backlight;
 	int sbl_enable;
-	int sbl_lsensor_value;
+	uint32_t sbl_lsensor_value;
 	int sbl_level;
 	dss_sbl_t sbl;
 	int sre_enable;
 
+	ktime_t te_timestamp; //record the timestamp of TE signal
 	int color_temperature_flag;
 	int display_effect_flag;
 	int xcc_coef_set;
@@ -489,22 +571,26 @@ struct hisi_fb_data_type {
 	dss_ce_info_t acm_ce_info;
 	dss_ce_info_t prefix_ce_info[DSS_CHN_MAX_DEFINE];
 	display_engine_info_t de_info;
+	display_engine_param_t de_param;
 	int user_scene_mode;
 	int dimming_count;
 	acm_reg_t acm_reg;
-	uint32_t rgbw_bl_count;
-#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_970)
+#if !defined(CONFIG_HISI_FB_3650) && !defined (CONFIG_HISI_FB_6250)
 	dss_ce_info_t hiace_info;
 	dss_gm_t dynamic_gamma_info;
 	char blc_last_bl_level;
 	char reserved[3];
 #endif
 	bool dirty_region_updt_enable;
+	uint32_t  online_play_count;
 
 	spinlock_t effect_lock;
 	struct dss_module_update effect_updated_flag;
 	struct dss_effect effect_ctl;
 	struct dss_effect_info effect_info;
+#if defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510)
+	bool effect_gmp_update_flag;
+#endif
 
 	int sysfs_index;
 	struct attribute *sysfs_attrs[HISI_FB_SYSFS_ATTRS_NUM];
@@ -512,9 +598,12 @@ struct hisi_fb_data_type {
 
 	struct hisifb_vsync vsync_ctrl;
 	struct hisifb_buf_sync buf_sync_ctrl;
-	struct dss_clk_rate dss_clk_rate;
+	struct hisifb_video_idle_ctrl video_idle_ctrl;
+	struct dss_vote_cmd dss_vote_cmd;
+	struct hisifb_writeback wb_ctrl;
 	struct hisifb_secure secure_ctrl;
 	struct hisifb_esd esd_ctrl;
+	struct hisifb_pipe_clk pipe_clk_ctrl;
 	struct dp_ctrl dp;
 	bool need_refresh;
 	mdc_func_ops_t mdc_ops;
@@ -555,16 +644,18 @@ struct hisi_fb_data_type {
 	struct dss_rect dirty_region_updt;
 	uint32_t esd_happened;
 	uint32_t esd_recover_state;
-
-	struct ion_client *ion_client;
-	struct ion_handle *ion_handle;
-	struct iommu_map_format iommu_format;
-	struct iommu_domain* hisi_domain;
+#if CONFIG_ION_ALLOC_BUFFER
+	struct ion_client *buffer_client;
+	struct ion_handle *buffer_handle;
+#endif
+	struct sg_table *fb_sg_table;
 
 	struct gen_pool *cmdlist_pool;
+#if CONFIG_ION_ALLOC_BUFFER
 	struct ion_handle *cmdlist_pool_ion_handle;
+#endif
 	void *cmdlist_pool_vir_addr;
-	ion_phys_addr_t cmdlist_pool_phy_addr;
+	phys_addr_t cmdlist_pool_phy_addr;
 	size_t sum_cmdlist_pool_size;
 
 	struct fb_info *fbi;
@@ -583,6 +674,9 @@ struct hisi_fb_data_type {
 	struct workqueue_struct *dss_debug_wq;
 	struct work_struct dss_debug_work;
 
+	struct workqueue_struct *aod_ud_fast_unblank_workqueue;
+	struct work_struct aod_ud_fast_unblank_work;
+
 	struct workqueue_struct *ldi_underflow_wq;
 	struct work_struct ldi_underflow_work;
 	struct workqueue_struct *rch2_ce_end_wq;
@@ -591,14 +685,26 @@ struct hisi_fb_data_type {
 	struct work_struct rch4_ce_end_work;
 	struct workqueue_struct *dpp_ce_end_wq;
 	struct work_struct dpp_ce_end_work;
-#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_970)
+#if !defined(CONFIG_HISI_FB_3650) && !defined (CONFIG_HISI_FB_6250)
 	struct workqueue_struct *hiace_end_wq;
 	struct work_struct hiace_end_work;
 #endif
+	struct workqueue_struct *display_engine_wq;
+	struct work_struct display_engine_work;
 #if defined (CONFIG_HUAWEI_DSM)
 	struct workqueue_struct *dss_underflow_debug_workqueue;
 	struct work_struct dss_underflow_debug_work;
 #endif
+#if defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510) || defined (CONFIG_HISI_FB_V330)
+	struct workqueue_struct *gmp_lut_wq;
+	struct work_struct gmp_lut_work;
+#endif
+
+	struct workqueue_struct *masklayer_backlight_notify_wq;
+	struct work_struct masklayer_backlight_notify_work;
+
+	struct workqueue_struct *delayed_cmd_queue_wq;
+	struct work_struct delayed_cmd_queue_work;
 
 	dss_rect_t resolution_rect;
 
@@ -613,6 +719,10 @@ struct hisi_fb_data_type {
 	uint32_t vsync_ctrl_type;
 	struct notifier_block nb;
 	struct notifier_block lcd_int_nb; //for clear lcd ocp interrupt
+
+	/*sensorhub aod */
+	bool masklayer_maxbacklight_flag;
+	struct semaphore sh_aod_blank_sem;
 };
 
 
@@ -654,12 +764,6 @@ uint32_t get_panel_yres(struct hisi_fb_data_type *hisifd);
 bool is_fastboot_display_enable(void);
 bool is_dss_idle_enable(void);
 
-
-/* fb buffer */
-unsigned long hisifb_alloc_fb_buffer(struct hisi_fb_data_type *hisifd);
-void hisifb_free_fb_buffer(struct hisi_fb_data_type *hisifd);
-void hisifb_free_logo_buffer(struct hisi_fb_data_type *hisifd);
-
 /* dss secure */
 void hisifb_secure_register(struct platform_device *pdev);
 void hisifb_secure_unregister(struct platform_device *pdev);
@@ -671,8 +775,14 @@ void hisifb_backlight_cancel(struct hisi_fb_data_type *hisifd);
 void hisifb_backlight_register(struct platform_device *pdev);
 void hisifb_backlight_unregister(struct platform_device *pdev);
 void hisifb_sbl_isr_handler(struct hisi_fb_data_type *hisifd);
-void hisifb_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bkl_lvl);
+void hisifb_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bkl_lvl, bool enforce);
 int updateCabcPwm(struct hisi_fb_data_type *hisifd);
+
+/* backlight flicker detector*/
+void bl_flicker_detector_init(display_engine_flicker_detector_config_t config);
+void bl_flicker_detector_collect_upper_bl(int level);
+void bl_flicker_detector_collect_algo_delta_bl(int level);
+void bl_flicker_detector_collect_device_bl(int level);
 
 /* vsync */
 void hisifb_frame_updated(struct hisi_fb_data_type *hisifd);
@@ -686,9 +796,12 @@ void hisifb_vsync_isr_handler(struct hisi_fb_data_type *hisifd);
 void hisifb_vsync_register(struct platform_device *pdev);
 void hisifb_vsync_unregister(struct platform_device *pdev);
 void hisifb_vsync_disable_enter_idle(struct hisi_fb_data_type *hisifd, bool disable);
-
+void hisifb_video_idle_ctrl_register(struct platform_device *pdev);
+void hisifb_video_idle_ctrl_unregister(struct platform_device *pdev);
 void hisifb_esd_register(struct platform_device *pdev);
 void hisifb_esd_unregister(struct platform_device *pdev);
+void hisifb_masklayer_backlight_flag_config(struct hisi_fb_data_type *hisifd,
+	bool masklayer_backlight_flag);
 
 /* buffer sync */
 int hisifb_layerbuf_lock(struct hisi_fb_data_type *hisifd,
@@ -699,13 +812,15 @@ void hisifb_layerbuf_unlock(struct hisi_fb_data_type *hisifd,
 	struct list_head *pfree_list);
 void hisifb_layerbuf_lock_exception(struct hisi_fb_data_type *hisifd,
 	struct list_head *lock_list);
+int hisifb_offline_layerbuf_lock(struct hisi_fb_data_type *hisifd,
+	dss_overlay_t *pov_req, struct list_head *plock_list);
 
 int hisifb_buf_sync_wait(int fence_fd);
-int hisifb_buf_sync_handle_offline(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov_req);
 int hisifb_buf_sync_handle(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov_req);
 void hisifb_buf_sync_signal(struct hisi_fb_data_type *hisifd);
 void hisifb_buf_sync_suspend(struct hisi_fb_data_type *hisifd);
-int hisifb_buf_sync_create_fence(struct hisi_fb_data_type *hisifd, unsigned value);
+int hisifb_buf_sync_create_fence(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov_req);
+void hisifb_buf_sync_close_fence(dss_overlay_t *pov_req);
 void hisifb_buf_sync_register(struct platform_device *pdev);
 void hisifb_buf_sync_unregister(struct platform_device *pdev);
 
@@ -717,7 +832,7 @@ int hisifb_ctrl_lp(struct hisi_fb_data_type *hisifd, bool lp_enter);
 int hisifb_ctrl_sbl(struct fb_info *info, int value);
 int hisifb_ctrl_dss_voltage_get(struct fb_info *info, void __user *argp);
 int hisifb_ctrl_dss_voltage_set(struct fb_info *info, void __user *argp);
-int hisifb_ctrl_dss_clk_rate_set(struct fb_info *info, void __user *argp);
+int hisifb_ctrl_dss_vote_cmd_set(struct fb_info *info, const void __user *argp);
 int hisifb_fps_upt_isr_handler(struct hisi_fb_data_type *hisifd);
 int hisifb_ctrl_esd(struct hisi_fb_data_type *hisifd);
 void hisifb_sysfs_attrs_add(struct hisi_fb_data_type * hisifd);
@@ -740,5 +855,22 @@ struct platform_device *hisi_fb_add_device(struct platform_device *pdev);
 int hisi_lcd_ocp_recover(struct notifier_block *nb,
 		unsigned long event, void *data);
 #endif
+
+#if defined (CONFIG_HISI_FB_970) || defined (CONFIG_HISI_FB_V501)
+/* sensorhub aod*/
+bool hisi_sensorhub_aod_hw_lock(struct hisi_fb_data_type *hisifd);
+bool hisi_sensorhub_aod_hw_unlock(struct hisi_fb_data_type *hisifd);
+int hisi_sensorhub_aod_unblank(void);
+int hisi_sensorhub_aod_blank(void);
+#endif
+
+int hisi_dss_alloc_cmdlist_buffer(struct hisi_fb_data_type *hisifd);
+void hisi_dss_free_cmdlist_buffer(struct hisi_fb_data_type *hisifd);
+unsigned long hisifb_alloc_fb_buffer(struct hisi_fb_data_type *hisifd);
+void hisifb_free_fb_buffer(struct hisi_fb_data_type *hisifd);
+
+int hisifb_create_buffer_client(struct hisi_fb_data_type *hisifd);
+void hisifb_destroy_buffer_client(struct hisi_fb_data_type *hisifd);
+void hisifb_free_logo_buffer(struct hisi_fb_data_type *hisifd);
 
 #endif /* HISI_FB_H */

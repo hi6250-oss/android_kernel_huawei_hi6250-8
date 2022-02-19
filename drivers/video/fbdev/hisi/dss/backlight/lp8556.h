@@ -13,7 +13,10 @@
 
 #include "hisi_fb.h"
 #include <linux/hisi/hw_cmdline_parse.h> //for runmode_is_factory
+
+#if defined(CONFIG_LCDKIT_DRIVER)
 #include "lcdkit_panel.h"
+#endif
 
 #define LP8556_NAME "lp8556"
 #define DTS_COMP_LP8556 "ti,lp8556"
@@ -31,8 +34,37 @@
 #define LP8556_EPROM_CFG9			0XA9
 #define LP8556_EPROM_CFGA			0XAA
 #define LP8556_EPROM_CFGE			0XAE
+#define LP8556_EPROM_CFG98			0X98
 #define LP8556_EPROM_CFG9E			0X9E
 #define LP8556_LED_ENABLE			0X16
+#define LP8556_FUALT_FLAG			0X02
+
+#define LP8556_ENABLE_ALL_LEDS      0x3f
+#define LP8556_DISABLE_ALL_LEDS     0X00
+#define LP8556_FAULT_SHORT_BIT      6
+#define LP8556_FAULT_OPEN_BIT       7
+#define LP8556_LED1_SHORT_ERR_BIT   10
+#define LP8556_LED1_OPEN_ERR_BIT    4
+#define LP8556_LED_NUM              6
+
+
+
+#define TEST_OK                  0
+#define TEST_ERROR_DEV_NULL      BIT(0)
+#define TEST_ERROR_DATA_NULL     BIT(1)
+#define TEST_ERROR_CLIENT_NULL   BIT(2)
+#define TEST_ERROR_I2C           BIT(3)
+#define TEST_ERROR_LED1_OPEN     BIT(4)
+#define TEST_ERROR_LED2_OPEN     BIT(5)
+#define TEST_ERROR_LED3_OPEN     BIT(6)
+#define TEST_ERROR_LED4_OPEN     BIT(7)
+#define TEST_ERROR_LED5_OPEN     BIT(8)
+#define TEST_ERROR_LED6_OPEN     BIT(9)
+
+#define LP8556_BL_MIN            0
+#define LP8556_BL_MAX            4095
+
+
 
 #ifndef BIT
 #define BIT(x)  (1<<(x))
@@ -71,7 +103,7 @@ struct lp8556_chip_data {
 };
 
 #define GPIO_LP8556_EN_NAME "lp8556_hw_en"
-#define LP8556_RW_REG_MAX  14
+#define LP8556_RW_REG_MAX  15
 
 struct lp8556_backlight_information {
 	/* whether support lp8556 or not */
@@ -82,6 +114,9 @@ struct lp8556_backlight_information {
 	int lp8556_hw_en_gpio;
 	int lp8556_reg[LP8556_RW_REG_MAX];
 	int bl_on_kernel_mdelay;
+	int lp8556_level_lsb;
+	int lp8556_level_msb;
+	int bl_led_num;
 };
 
 ssize_t lp8556_set_backlight_init(uint32_t bl_level);

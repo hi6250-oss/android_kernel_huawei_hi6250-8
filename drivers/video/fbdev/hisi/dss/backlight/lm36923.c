@@ -23,6 +23,8 @@
 #include <dsm/dsm_pub.h>
 extern struct dsm_client *lcd_dclient;
 
+#define TEST_ERROR_CHIP_INIT BIT(10)
+
 struct class *lm36923_class;
 struct lm36923_chip_data *g_pchip;
 static int lcd_fake_panel_enable_reg = 0x3;
@@ -33,6 +35,11 @@ static int lm36923_hw_en_gpio = 0;
 #define ENABLE_REG_DEFAULT	0x0
 #define LSB_REG_DEFAULT	0x0
 #define MSB_REG_DEFAULT	0x0
+#define REG_REVISION 0x00
+#define REG_MAX 0x1F
+#define LOG_LEVEL_INFO 7
+#define BL_MAX 2047
+
 static struct gpio_desc lm36923_hw_en_on_cmds[] = {
 	{DTYPE_GPIO_REQUEST, WAIT_TYPE_US, 0,
 		GPIO_LM36923_EN_NAME, &lm36923_hw_en_gpio, 0},
@@ -54,7 +61,7 @@ static struct gpio_desc lm36923_hw_en_free_cmds[] =
 		GPIO_LM36923_EN_NAME, &lm36923_hw_en_gpio, 0},
 };
 
-
+/*lint -save -e502 -e568 -e570 -e650 -e685*/
 /*
 ** for debug, S_IRUGO
 ** /sys/module/hisifb/parameters
@@ -80,6 +87,11 @@ static int lm36923_chip_init(struct lm36923_chip_data *pchip)
 	int fault_ctrl = 0;
 
 	LM36923_INFO("in!\n");
+
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return ret;
+	}
 
 	np = of_find_compatible_node(NULL, NULL, DTS_COMP_TI_LM36923);
 	if (!np) {
@@ -229,6 +241,11 @@ ssize_t lm36923_set_backlight_mode(uint32_t bl_mode)
 		return ret;
 	}
 
+	if(g_pchip == NULL){
+		LM36923_ERR("g_chip is null pointer\n");
+		return ret;
+	}
+
 	mode = bl_mode;
 
 	if (mode > BRT_RAMP_MUL_MODE) {
@@ -254,6 +271,11 @@ EXPORT_SYMBOL(lm36923_set_backlight_mode);
 ssize_t lm36923_resume_init(struct lm36923_chip_data *pchip)
 {
 	int ret = 0;
+
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return -1;
+	}
 
 	ret = regmap_write(pchip->regmap, REG_ENABLE,ENABLE_REG_DEFAULT);
 	if (ret < 0)
@@ -308,10 +330,17 @@ out:
 ssize_t lm36923_set_backlight_init(uint32_t bl_level)
 {
 	int ret = 0;
+
 	if (g_fake_lcd_flag) {
 		LM36923_INFO("is fake lcd!\n");
 		return ret;
 	}
+
+	if(g_pchip == NULL){
+		LM36923_ERR("g_chip is null pointer\n");
+		return -1;
+	}
+
 	if (down_trylock(&(g_pchip->test_sem))) {
 		LM36923_INFO("Now in test mode\n");
 		return 0;
@@ -362,6 +391,11 @@ ssize_t lm36923_set_backlight_reg(uint32_t bl_level)
 
 	if (!lm36923_init_status) {
 		LM36923_ERR("init fail, return.\n");
+		return ret;
+	}
+
+	if(g_pchip == NULL){
+		LM36923_ERR("g_chip is null pointer\n");
 		return ret;
 	}
 
@@ -543,8 +577,19 @@ static ssize_t lm36923_bled_mode_store(struct device *dev,
 					const char *buf, size_t size)
 {
 	ssize_t ret = -1;
-	struct lm36923_chip_data *pchip = dev_get_drvdata(dev);
+	struct lm36923_chip_data *pchip = NULL;
 	uint32_t mode = 0;
+
+	if(dev == NULL || g_pchip == NULL){
+		LM36923_ERR("dev or g_chip is null pointer\n");
+		return ret;
+	}
+
+	pchip = dev_get_drvdata(dev);
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return ret;
+	}
 
 	ret = kstrtouint(buf, 16, &mode);
 	if (ret)
@@ -606,10 +651,21 @@ static ssize_t lm36923_reg_bl_store(struct device *dev,
 					const char *buf, size_t size)
 {
 	ssize_t ret = -1;
-	struct lm36923_chip_data *pchip = dev_get_drvdata(dev);
+	struct lm36923_chip_data *pchip = NULL;
 	unsigned int bl_level = 0;
 	unsigned int bl_msb = 0;
 	unsigned int bl_lsb = 0;
+
+	if(dev == NULL){
+		LM36923_ERR("dev is null pointer\n");
+		return ret;
+	}
+
+	pchip = dev_get_drvdata(dev);
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return ret;
+	}
 
 	ret = kstrtouint(buf, 10, &bl_level);
 	if (ret)
@@ -668,63 +724,20 @@ static ssize_t lm36923_reg_show(struct device *dev,
 	client = pchip->client;
 	if(!client)
 		return snprintf(buf, PAGE_SIZE, "client is null\n");
-
 	ret = regmap_read(pchip->regmap, 0x00, &val[0]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x01, &val[1]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x10, &val[2]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x11, &val[3]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x12, &val[4]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x13, &val[5]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x14, &val[6]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x15, &val[7]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x16, &val[8]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x17, &val[9]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x18, &val[10]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x19, &val[11]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x1E, &val[12]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 	ret = regmap_read(pchip->regmap, 0x1F, &val[13]);
-	if (ret < 0) {
-		goto i2c_error;
-	}
 
 	return snprintf(buf, PAGE_SIZE, "Revision(0x00)= 0x%x\nSoftware Reset(0x01)= 0x%x\n \
 			\rEnable(0x10) = 0x%x\nBrightness Control(0x11) = 0x%x\n \
@@ -736,8 +749,6 @@ static ssize_t lm36923_reg_show(struct device *dev,
 			val[0],val[1],val[2],val[3],val[4],val[5],val[6],val[7],
 			val[8],val[9],val[10],val[11],val[12],val[13]);
 
-i2c_error:
-	return snprintf(buf, PAGE_SIZE,"%s: i2c access fail to register\n", __func__);
 }
 
 static ssize_t lm36923_reg_store(struct device *dev,
@@ -745,10 +756,21 @@ static ssize_t lm36923_reg_store(struct device *dev,
 					const char *buf, size_t size)
 {
 	ssize_t ret = -1;
-	struct lm36923_chip_data *pchip = dev_get_drvdata(dev);
+	struct lm36923_chip_data *pchip = NULL;
 	unsigned int reg = 0;
 	unsigned int mask = 0;
 	unsigned int val = 0;
+
+	if(dev == NULL){
+		LM36923_ERR("dev is null pointer\n");
+		return ret;
+	}
+
+	pchip = dev_get_drvdata(dev);
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return ret;
+	}
 
 	ret = sscanf(buf, "reg=0x%x, mask=0x%x, val=0x%x",&reg,&mask,&val);
 	if (ret < 0) {
@@ -786,6 +808,11 @@ static int lm36923_test_set_brightness(struct lm36923_chip_data *pchip, int leve
 	int bl_lsb = 0;
 	int bl_msb = 0;
 
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return -1;
+	}
+
 	/* 11-bit brightness code */
 	bl_msb = level >> 3;
 	bl_lsb = level & 0x07;
@@ -810,6 +837,11 @@ static int lm36923_test_led_open(struct lm36923_chip_data *pchip, int led)
 	int result = TEST_OK;
 	unsigned int val = 0;
 	int enable_reg = 0xF;
+
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return -1;
+	}
 
 	switch(lm36923_led_num){
 		case TI_LM36923_LED_TWO:
@@ -872,13 +904,18 @@ static int lm36923_test_led_open(struct lm36923_chip_data *pchip, int led)
 	msleep(1000);
 	return result;
 }
-
+/*lint -restore*/
 static int lm36923_test_led_short(struct lm36923_chip_data *pchip, int led)
 {
 	unsigned int val = 0;
 	int ret;
 	int result = TEST_OK;
 	int enable_reg = 0xF;
+
+	if(pchip == NULL){
+		LM36923_ERR("pchip is null pointer\n");
+		return -1;
+	}
 
 	switch(lm36923_led_num){
 		case TI_LM36923_LED_TWO:
@@ -946,6 +983,11 @@ static int lm36923_test_regs_store(struct lm36923_chip_data *pchip, unsigned int
 {
 	int ret;
 
+	if((pchip == NULL) || (reg_val == NULL)){
+		LM36923_ERR("pchip or reg_val is null pointer\n");
+		return -1;
+	}
+
 	ret = regmap_read(pchip->regmap, REG_BRT_CTR, &reg_val[0]);
 	if (ret < 0) {
 		LM36923_ERR("TEST_ERROR_I2C\n");
@@ -989,6 +1031,11 @@ static int lm36923_test_regs_store(struct lm36923_chip_data *pchip, unsigned int
 static int lm36923_test_regs_restore(struct lm36923_chip_data *pchip, unsigned int reg_val[])
 {
 	int ret;
+
+	if((pchip == NULL) || (reg_val == NULL)){
+		LM36923_ERR("pchip or reg_val is null pointer\n");
+		return -1;
+	}
 
 	ret = regmap_write(pchip->regmap, REG_FAULT_CTR, reg_val[3]);
 	if (ret < 0) {
@@ -1114,12 +1161,23 @@ static const struct attribute_group lm36923_group = {
 static int lm36923_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
-	struct i2c_adapter *adapter = client->adapter;
+	struct i2c_adapter *adapter = NULL;
 	struct lm36923_chip_data *pchip;
 	int ret = -1;
 	unsigned int val = 0;
 
 	LM36923_INFO("in!\n");
+
+	if(client == NULL){
+		LM36923_ERR("client is NULL pointer\n");
+		return -1;
+	}
+
+	adapter = client->adapter;
+	if(adapter == NULL){
+		LM36923_ERR("adapter is NULL pointer\n");
+		return -1;
+	}
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "i2c functionality check fail.\n");
@@ -1194,7 +1252,18 @@ err_out:
 
 static int lm36923_remove(struct i2c_client *client)
 {
-	struct lm36923_chip_data *pchip = i2c_get_clientdata(client);
+	struct lm36923_chip_data *pchip = NULL;
+
+	if(client == NULL){
+		LM36923_ERR("client is NULL pointer\n");
+		return -1;
+	}
+
+	pchip = i2c_get_clientdata(client);
+	if(pchip == NULL){
+		LM36923_ERR("pchip is NULL pointer\n");
+		return -1;
+	}
 
 	regmap_write(pchip->regmap, REG_ENABLE, 0x00);
 

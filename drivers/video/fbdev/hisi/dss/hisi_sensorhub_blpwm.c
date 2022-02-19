@@ -20,7 +20,7 @@ static int g_blpwm_on = 0;
 
 #define SET_BACKLIGHT_PATH "/sys/devices/platform/huawei_sensor/sbl_setbacklight"
 
-static int  hisifb_write_file(char *filename, char *buf, uint32_t buf_len)
+static int  hisifb_write_file(char *filename, const char *buf, uint32_t buf_len)
 {
 	ssize_t write_len = 0;
 	struct file *fd = NULL;
@@ -44,7 +44,7 @@ static int  hisifb_write_file(char *filename, char *buf, uint32_t buf_len)
 	}
 
 	old_fs = get_fs();
-	set_fs(KERNEL_DS);
+	set_fs(KERNEL_DS); //lint !e501
 
 	write_len = vfs_write(fd, (char __user*)buf, buf_len, &pos);
 

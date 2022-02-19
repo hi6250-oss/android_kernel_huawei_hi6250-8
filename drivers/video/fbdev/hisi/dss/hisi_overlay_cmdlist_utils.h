@@ -29,6 +29,22 @@
 #include "hisi_overlay_utils_kirin970.h"
 #endif
 
+#ifdef CONFIG_HISI_FB_V501
+#include "hisi_overlay_utils_dssv501.h"
+#endif
+
+#ifdef CONFIG_HISI_FB_V510
+#include "hisi_overlay_utils_dssv510.h"
+#endif
+
+#ifdef CONFIG_HISI_FB_V320
+#include "hisi_overlay_utils_dssv320.h"
+#endif
+
+#ifdef CONFIG_HISI_FB_V330
+#include "hisi_overlay_utils_dssv330.h"
+#endif
+
 #define CONFIG_HISI_DSS_CMDLIST_LAST_USED
 
 #define HISI_DSS_CMDLIST_DATA_MAX	  (3)
@@ -155,20 +171,18 @@ enum dss_cmdlist_status {
 
 /*
 ** for normal node,all variable should be filled.
-** for NOP node, just the list_header,header_ion_handle,list_node, node_flag should be filled.
+** for NOP node, just the list_header,header_buffer_handle,list_node, node_flag should be filled.
 ** node_type must be CMDLIST_NODE_NOP when it is NOP node.
-** And item_ion_handle in NOP node should be NULL.
+** And item_buffer_handle in NOP node should be NULL.
 */
 typedef struct dss_cmdlist_node {
 	struct list_head list_node;
 
-	struct ion_handle *header_ion_handle;
-	ion_phys_addr_t header_phys;
+	phys_addr_t header_phys;
 	cmd_header_t *list_header;
 	size_t header_len;
 
-	struct ion_handle *item_ion_handle;
-	ion_phys_addr_t item_phys;
+	phys_addr_t item_phys;
 	cmd_item_t *list_item;
 	size_t item_len;
 

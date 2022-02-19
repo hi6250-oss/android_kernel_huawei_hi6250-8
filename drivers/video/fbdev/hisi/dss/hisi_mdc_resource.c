@@ -48,7 +48,12 @@ static int mdc_chn_request_handle(struct hisi_fb_data_type *hisifd,
 		HISI_FB_ERR("hisifd or chn_info is null.\n");
 		return -EINVAL;
 	}
+
 	mdc_ops = &(hisifd->mdc_ops);
+	if (mdc_ops->chan_num > MAX_MDC_CHANNEL) {
+		HISI_FB_ERR("chan_num=%d is invalid.\n", mdc_ops->chan_num);
+		return -EINVAL;
+	}
 
 	for (i = 0; i < mdc_ops->chan_num; i++) {
 		mdc_chn = &(mdc_ops->mdc_channel[i]);
@@ -72,11 +77,25 @@ static int mdc_chn_request_handle(struct hisi_fb_data_type *hisifd,
 		}
 
 		if (mdc_chn->status != FREE) {
+			HISI_FB_DEBUG("mdc_chn status is not FREE!, mdc_chn status = %d \n", mdc_chn->status);
 			continue;
 		}
 
 		/* chn available */
 		if ((chn_info->rch_need_cap & CAP_HFBCD) == CAP_HFBCD) {
+			if ((chn_info->mmbuf_size == 0)
+				|| (chn_info->mmbuf_size > MMBUF_SIZE_MDC_MAX)
+				|| (chn_info->mmbuf_size & (MMBUF_ADDR_ALIGN - 1))) {
+
+				HISI_FB_ERR("fb%d, mmbuf size is invalid, size = %d!\n",
+					hisifd->index, chn_info->mmbuf_size);
+				return -EINVAL;
+			}
+
+			chn_info->mmbuf_addr = MMBUF_SIZE_MAX + MMBUF_BASE;//hisi_dss_mmbuf_alloc(hisifd->mmbuf_gen_pool, chn_info->mmbuf_size);
+		}
+
+		if ((chn_info->rch_need_cap & CAP_AFBCD) == CAP_AFBCD) {
 			if ((chn_info->mmbuf_size == 0)
 				|| (chn_info->mmbuf_size > MMBUF_SIZE_MDC_MAX)
 				|| (chn_info->mmbuf_size & (MMBUF_ADDR_ALIGN - 1))) {
@@ -98,6 +117,8 @@ static int mdc_chn_request_handle(struct hisi_fb_data_type *hisifd,
 		} else {
 			mdc_chn->status = MDC_USED;
 		}
+		mdc_chn->drm_used = chn_info->is_drm;
+		HISI_FB_DEBUG("chn_info is_drm = %d, hold_flag = %d, status = %d \n", chn_info->is_drm, chn_info->hold_flag, mdc_chn->status);
 
 		HISI_FB_DEBUG("request mdc channel(%d) seccess.\n", mdc_chn->rch_idx);
 		return 0;
@@ -125,10 +146,12 @@ static int mdc_chn_request_handle(struct hisi_fb_data_type *hisifd,
 		}
 
 		if ((mdc_chn->status == MDC_USED) && (chn_info->hold_flag == HWC_REQUEST)) {
+
 			continue;
 		}
 
 		if ((mdc_chn->status == HWC_USED) && (chn_info->hold_flag == MDC_REQUEST)) {
+
 			hisifd->need_refresh = true;
 			wake_up_interruptible_all(&(mdc_ops->refresh_handle_wait));
 		}
@@ -147,11 +170,26 @@ static int mdc_chn_request_handle(struct hisi_fb_data_type *hisifd,
 			chn_info->mmbuf_addr = MMBUF_SIZE_MAX + MMBUF_BASE;//hisi_dss_mmbuf_alloc(hisifd->mmbuf_gen_pool, chn_info->mmbuf_size);
 		}
 
+		if ((chn_info->rch_need_cap & CAP_AFBCD) == CAP_AFBCD) {
+			if ((chn_info->mmbuf_size == 0)
+				|| (chn_info->mmbuf_size > MMBUF_SIZE_MDC_MAX)
+				|| (chn_info->mmbuf_size & (MMBUF_ADDR_ALIGN - 1))) {
+
+				HISI_FB_ERR("fb%d, mmbuf size is invalid, size = %d!\n",
+					hisifd->index, chn_info->mmbuf_size);
+				return -EINVAL;
+			}
+
+			chn_info->mmbuf_addr = MMBUF_SIZE_MAX + MMBUF_BASE;//hisi_dss_mmbuf_alloc(hisifd->mmbuf_gen_pool, chn_info->mmbuf_size);
+		}
+
 		chn_info->rch_idx = mdc_chn->rch_idx;
 		chn_info->wch_idx = mdc_chn->wch_idx;
 		chn_info->ovl_idx = mdc_chn->ovl_idx;
 		chn_info->wb_composer_type = mdc_chn->wb_composer_type;
 		mdc_chn->status = MDC_USED;
+		mdc_chn->drm_used = chn_info->is_drm;
+		HISI_FB_DEBUG("hold_status = %d, status = %d, drm_used = %d \n", chn_info->hold_flag, mdc_chn->status, chn_info->is_drm);
 
 		HISI_FB_DEBUG("Request mdc channel(%d) success.\n", mdc_chn->rch_idx);
 		return 0;
@@ -172,7 +210,12 @@ int mdc_chn_release_handle(struct hisi_fb_data_type *hisifd,
 		HISI_FB_ERR("hisifd or chn_info is null.\n");
 		return -EINVAL;
 	}
+
 	mdc_ops = &(hisifd->mdc_ops);
+	if (mdc_ops->chan_num > MAX_MDC_CHANNEL) {
+		HISI_FB_ERR("chan_num=%d is invalid.\n", mdc_ops->chan_num);
+		return -EINVAL;
+	}
 
 	for (i = 0; i < mdc_ops->chan_num; i++) {
 		mdc_chn = &(mdc_ops->mdc_channel[i]);
@@ -210,7 +253,6 @@ int hisi_mdc_chn_request(struct fb_info *info, void __user *argp)
 	struct hisi_fb_data_type *hisifd = NULL;
 	mdc_func_ops_t *mdc_ops = NULL;
 	mdc_ch_info_t chn_info;
-
 	if (NULL == info) {
 		HISI_FB_ERR("info null pointer!\n");
 		return -EINVAL;
@@ -231,7 +273,6 @@ int hisi_mdc_chn_request(struct fb_info *info, void __user *argp)
 		HISI_FB_ERR("argp null pointer!\n");
 		return -EINVAL;
 	}
-
 	mdc_ops = &(hisifd->mdc_ops);
 	ret = copy_from_user(&chn_info, argp, sizeof(mdc_ch_info_t));
 	if (ret) {
@@ -268,7 +309,7 @@ int hisi_mdc_chn_request(struct fb_info *info, void __user *argp)
 	return ret;
 }
 
-int hisi_mdc_chn_release(struct fb_info *info, void __user *argp)
+int hisi_mdc_chn_release(struct fb_info *info, const void __user *argp)
 {
 	int ret = 0;
 	struct hisi_fb_data_type *hisifd = NULL;
@@ -347,9 +388,12 @@ int hisi_mdc_resource_init(struct hisi_fb_data_type *hisifd, unsigned int platfo
 			mdc_ops->mdc_channel[0].ovl_idx = DSS_OVL3;
 			mdc_ops->mdc_channel[0].wb_composer_type = DSS_WB_COMPOSE_COPYBIT;
 			mdc_ops->mdc_channel[0].status = FREE;
+			mdc_ops->mdc_channel[0].drm_used= 0;
 			break;
 
+		case FB_ACCEL_DSSV320:
 		case FB_ACCEL_HI625x:
+		case FB_ACCEL_DSSV330:
 			mdc_ops->chan_num = 1;
 			mdc_ops->mdc_channel[0].cap_available = CAP_BASE | CAP_DIM \
 				| CAP_SCL | CAP_YUV_PACKAGE \
@@ -360,6 +404,7 @@ int hisi_mdc_resource_init(struct hisi_fb_data_type *hisifd, unsigned int platfo
 			mdc_ops->mdc_channel[0].ovl_idx = DSS_OVL2;
 			mdc_ops->mdc_channel[0].wb_composer_type = DSS_WB_COMPOSE_COPYBIT;
 			mdc_ops->mdc_channel[0].status = FREE;
+			mdc_ops->mdc_channel[0].drm_used= 0;
 			break;
 
 		case FB_ACCEL_HI366x:
@@ -373,9 +418,13 @@ int hisi_mdc_resource_init(struct hisi_fb_data_type *hisifd, unsigned int platfo
 			mdc_ops->mdc_channel[0].ovl_idx = DSS_OVL3;
 			mdc_ops->mdc_channel[0].wb_composer_type = DSS_WB_COMPOSE_COPYBIT;
 			mdc_ops->mdc_channel[0].status = FREE;
+			mdc_ops->mdc_channel[0].drm_used= 0;
 			break;
 
 		case FB_ACCEL_KIRIN970:
+		case FB_ACCEL_DSSV501:
+		case FB_ACCEL_DSSV510:
+			/*for copybit*/
 			mdc_ops->chan_num = 2;
 			mdc_ops->mdc_channel[0].cap_available = CAP_BASE | CAP_DIM \
 				| CAP_YUV_PACKAGE | CAP_YUV_SEMI_PLANAR \
@@ -385,18 +434,18 @@ int hisi_mdc_resource_init(struct hisi_fb_data_type *hisifd, unsigned int platfo
 			mdc_ops->mdc_channel[0].ovl_idx = DSS_OVL3;
 			mdc_ops->mdc_channel[0].wb_composer_type = DSS_WB_COMPOSE_COPYBIT;
 			mdc_ops->mdc_channel[0].status = FREE;
+			mdc_ops->mdc_channel[0].drm_used= 0;
 
 			mdc_ops->mdc_channel[1].cap_available = CAP_BASE | CAP_DIM \
 				| CAP_SCL | CAP_YUV_PACKAGE \
 				| CAP_YUV_SEMI_PLANAR | CAP_YUV_PLANAR \
-				| CAP_YUV_DEINTERLACE | CAP_HFBCD;
+				| CAP_YUV_DEINTERLACE | CAP_HFBCD | CAP_AFBCD;
 			mdc_ops->mdc_channel[1].rch_idx = DSS_RCHN_V1;
 			mdc_ops->mdc_channel[1].wch_idx = DSS_WCHN_W1;
 			mdc_ops->mdc_channel[1].ovl_idx = DSS_OVL3;
 			mdc_ops->mdc_channel[1].wb_composer_type = DSS_WB_COMPOSE_COPYBIT;
 			mdc_ops->mdc_channel[1].status = FREE;
-
-			// cppcheck-suppress *
+			mdc_ops->mdc_channel[1].drm_used= 0;
 			break;
 
 		default:

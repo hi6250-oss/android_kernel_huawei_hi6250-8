@@ -18,8 +18,13 @@
 #include "backlight/lp8556.h"
 #include <linux/timer.h>
 #include <linux/delay.h>
+#include <linux/device.h>
 #include "lcdkit_panel.h"
 #include "lcdkit_backlight_ic_common.h"
+
+
+
+#include <chipset_common/dubai/dubai.h>
 
 /* default pwm clk */
 #define DEFAULT_PWM_CLK_RATE	(120 * 1000000L)
@@ -100,19 +105,26 @@ static unsigned int f_count = 0;
 #define RGBW_BL_STOP_THRESHOLD 200
 #define RGBW_LOW_LIGHT_THRESHOLD  35
 #define RGBW_LOW_LIGHT_STOP 30
+#define RGBW_LG_RGB 480
+#define RGBW_LG_RGBW 800
+#define RGBW_LG_CDA 50
+#define RGBW_LG_CDA_OUTDOOR 766
+#define RGBW_LG_BIT 4096
+#define RGBW_LG_RGB_HMA 500
+#define RGBW_LG_RGBW_HMA 843
+#define RGBW_BOE_RGB_HMA 500
+#define RGBW_BOE_RGBW_HMA 820
+#define RGBW_BOE_FGL_HMA 224
+#define RGBW_BOE_PDG_HMA 142
+#define RGBW_BOE_CDA_HMA 255
+#define RGBW_BOE_PGL_HMA 100
+#define RGBW_BOE_TGL_HMA 128
 
-static uint32_t last_rgbw_bl_count = 0;
-static uint32_t rgbw_bl_stop_num = 0;
 static uint32_t rgbw_bl_stop_threshold_num = 0;
-static uint32_t backlight_update_counter = 0;
-static uint32_t rgbw_abnormal_flag = 0;
-static int32_t ap_backlight_delta_sum = 0;
 static int32_t low_light_count = 0;
 static int32_t last_backlight = 0;
 static int32_t last_pwm_duty = MIN_PWMDUTY_FOR_RGBW;
 static int32_t last_delta_pwm_duty_abs = 0;
-
-
 
 struct bl_info{
 	int32_t bl_max;
@@ -132,14 +144,14 @@ struct bl_info{
 	struct semaphore bl_semaphore;
 	int (*set_common_backlight)(int bl_level);
 };
-
 extern struct lcdkit_bl_ic_info g_bl_config;
-static struct bl_info g_bl_info;
 
+static struct bl_info g_bl_info;
+extern struct mutex g_rgbw_lock;
 #define BL_LVL_MAP_SIZE	(2047)
 #define BL_MAX_11BIT (2047)
 #define BL_MAX_12BIT (4095)
-static int bl_lvl_map(int level)
+int bl_lvl_map(int level)
 {
 	int ret = 0;
 	int idx = 0;
@@ -176,6 +188,11 @@ int hisi_blpwm_bl_callback(int bl_level)
 
 static void init_bl_info(struct hisi_panel_info *pinfo)
 {
+	if(pinfo == NULL){
+		HISI_FB_ERR("pinfo is null pointer\n");
+		return;
+	}
+
 	g_bl_info.bl_max = pinfo->bl_max;
 	g_bl_info.bl_min = pinfo->bl_min;
 	g_bl_info.ap_brightness = 0;
@@ -224,7 +241,7 @@ static uint32_t get_backlight_level(uint32_t bl_level_src)
 	uint32_t bl_level_dst = bl_level_src;
 
 	if (!g_bl_info.blpwm_preci_no_convert){
-		bl_level_dst = (bl_level_src * g_bl_info.blpwm_out_precision) / g_bl_info.bl_max;
+		bl_level_dst = (bl_level_src * g_bl_info.blpwm_out_precision) / g_bl_info.bl_max; //lint !e573
 	}
 
 	HISI_FB_DEBUG("get_backlight_level:bl_level_dst=%d, bl_level_src=%d, blpwm_out_precision=%d, \
@@ -235,20 +252,30 @@ bl_max=%d, blpwm_preci_no_convert = %d\n",
 	return bl_level_dst;
 }
 
-static void update_backlight(uint32_t backlight)
+static void update_backlight(struct hisi_fb_data_type *hisifd, uint32_t backlight)
 {
 	char __iomem *blpwm_base = NULL;
 	uint32_t brightness = 0;
 	uint32_t bl_level = get_backlight_level(backlight);
 
+	if (!hisifd) {
+		return;
+	}
+	if (hisifd->online_play_count < BACKLIGHT_LOG_PRINTF) {
+		HISI_FB_INFO("cabc8:bl_level=%d, backlight=%d, blpwm_out_precision=%d, bl_max=%d\n",
+				bl_level, backlight, g_bl_info.blpwm_out_precision, g_bl_info.bl_max);
+	} else {
 		HISI_FB_DEBUG("cabc8:bl_level=%d, backlight=%d, blpwm_out_precision=%d, bl_max=%d\n",
 				bl_level, backlight, g_bl_info.blpwm_out_precision, g_bl_info.bl_max);
-
+	}
 	blpwm_base = hisifd_blpwm_base;
 	if (!blpwm_base) {
 		HISI_FB_ERR("blpwm_base is null!\n");
 		return;
 	}
+
+	/* notify dubai module to update brightness */
+	dubai_update_brightness(backlight);
 
 	if ((g_bl_info.bl_ic_ctrl_mode >= REG_ONLY_MODE ) && (g_bl_info.bl_ic_ctrl_mode <= I2C_ONLY_MODE)) {
 		bl_level = backlight;
@@ -261,7 +288,8 @@ static void update_backlight(uint32_t backlight)
 			lm36274_set_backlight_reg(bl_level);
 		}
 		return;
-	}else if(g_bl_info.bl_ic_ctrl_mode == COMMON_IC_MODE) {
+	}
+	else if(g_bl_info.bl_ic_ctrl_mode == COMMON_IC_MODE) {
 		int return_value = -1;
 		bl_level = backlight;
 		switch(g_bl_config.bl_level) {
@@ -274,8 +302,12 @@ static void update_backlight(uint32_t backlight)
 				break;
 		};
 		return_value = hisi_blpwm_bl_callback(bl_level);
-		if(0 == return_value)
+		if (0 == return_value)
 			return;
+	}
+	else if(g_bl_info.bl_ic_ctrl_mode == AMOLED_NO_BL_IC_MODE) {
+		HISI_FB_INFO("bl_ic_ctrl_mode = %d\n",g_bl_info.bl_ic_ctrl_mode);
+		return;
 	}
 
 	brightness = (bl_level << 16) | (g_bl_info.blpwm_out_precision - bl_level);
@@ -329,16 +361,21 @@ static uint32_t get_pwm_duty(struct hisi_fb_data_type *hisifd){
 	return Continue_pwm_in_duty;
 }
 
-static void get_ap_dimming_to_update_backlight(void)
+static void get_ap_dimming_to_update_backlight(struct hisi_fb_data_type *hisifd)
 {
 	int32_t delta_cabc_pwm = 0;
 	int32_t pwm_duty = 0;
 	int32_t backlight = 0;
 
+	if(hisifd == NULL){
+		HISI_FB_ERR("hisifd is null pointer\n");
+		return;
+	}
+
 	HISI_FB_DEBUG("cabc3:jump while\n");
     if (g_bl_info.index_cabc_dimming > CABC_DIMMING_STEP_TOTAL_NUM) {
             HISI_FB_DEBUG("cabc4:dimming 32 time\n");
-            set_current_state(TASK_INTERRUPTIBLE);
+            set_current_state(TASK_INTERRUPTIBLE); //lint !e446 !e666
             schedule();
             g_bl_info.index_cabc_dimming = 1;
     } else {
@@ -365,7 +402,7 @@ static void get_ap_dimming_to_update_backlight(void)
                             g_bl_info.ap_brightness, g_bl_info.last_bl_level, backlight, g_bl_info.current_cabc_pwm, pwm_duty, g_bl_info.cabc_pwm,
                             g_bl_info.prev_cabc_pwm, delta_cabc_pwm);
             if (g_bl_info.ap_brightness != 0 && backlight != g_bl_info.last_bl_level) {
-                    update_backlight(backlight);
+                    update_backlight(hisifd, backlight);
                     g_bl_info.last_bl_level = backlight;
             }
 
@@ -418,12 +455,120 @@ static void reset_pwm_buf(uint32_t value) {
 	}
 }
 
-static int calc_backlight(struct hisi_fb_data_type *hisifd, int32_t pwm_duty, int32_t is_rgbw_abnormal) {
+static void set_rgbw_lg(struct hisi_fb_data_type *hisifd) {
+	int backlight_indoor_lgd = 0;
+	int RGBW_LG_FGL = RGBW_LG_RGBW * 4096 / RGBW_LG_RGB;
+	struct hisi_panel_info *pinfo = NULL;
+
+	if (hisifd == NULL) {
+		HISI_FB_ERR("hisifd is null!\n");
+		return;
+	}
+
+	pinfo = &(hisifd->panel_info);
+
+	if (pinfo == NULL) {
+		HISI_FB_ERR("pinfo is null!\n");
+		return;
+	}
+
+	backlight_indoor_lgd = (int)pinfo->bl_max * RGBW_LG_RGB / RGBW_LG_RGBW;
+	if (backlight_indoor_lgd == 0) {
+		HISI_FB_ERR("backlight_indoor_lgd is err!\n");
+		return;
+	}
+	if (hisifd->de_info.ddic_rgbw_backlight < backlight_indoor_lgd) {
+		hisifd->de_info.frame_gain_limit = RGBW_LG_FGL;
+		hisifd->de_info.color_distortion_allowance = RGBW_LG_CDA;
+		hisifd->de_info.pixel_gain_limit = 0;
+		hisifd->de_info.pwm_duty_gain = RGBW_LG_BIT;
+	} else {
+		hisifd->de_info.frame_gain_limit = (int)pinfo->bl_max * RGBW_LG_BIT / hisifd->de_info.ddic_rgbw_backlight;
+		hisifd->de_info.color_distortion_allowance = (hisifd->de_info.ddic_rgbw_backlight - backlight_indoor_lgd) * RGBW_LG_CDA_OUTDOOR / backlight_indoor_lgd + RGBW_LG_CDA;
+		hisifd->de_info.pixel_gain_limit = RGBW_LG_FGL - hisifd->de_info.frame_gain_limit;
+		hisifd->de_info.pwm_duty_gain = RGBW_LG_BIT;
+	}
+}
+
+static void set_rgbw_lg_hma(struct hisi_fb_data_type *hisifd) {
+	int backlight_indoor_lgd = 0;
+	int RGBW_LG_FGL = RGBW_LG_RGBW_HMA * 4096 / RGBW_LG_RGB_HMA;
+	struct hisi_panel_info *pinfo = NULL;
+
+	if (hisifd == NULL) {
+		HISI_FB_ERR("hisifd is null!\n");
+		return;
+	}
+
+	pinfo = &(hisifd->panel_info);
+
+	if (pinfo == NULL) {
+		HISI_FB_ERR("pinfo is null!\n");
+		return;
+	}
+
+	backlight_indoor_lgd = (int)pinfo->bl_max * RGBW_LG_RGB_HMA / RGBW_LG_RGBW_HMA;
+	if (backlight_indoor_lgd == 0) {
+		HISI_FB_ERR("backlight_indoor_lgd is err!\n");
+		return;
+	}
+	if (hisifd->de_info.ddic_rgbw_backlight < backlight_indoor_lgd) {
+		hisifd->de_info.frame_gain_limit = RGBW_LG_FGL;
+		hisifd->de_info.color_distortion_allowance = RGBW_LG_CDA;
+		hisifd->de_info.pixel_gain_limit = 0;
+		hisifd->de_info.pwm_duty_gain = RGBW_LG_BIT;
+	} else {
+		hisifd->de_info.frame_gain_limit = (int)pinfo->bl_max * RGBW_LG_BIT / hisifd->de_info.ddic_rgbw_backlight;
+		hisifd->de_info.color_distortion_allowance = (hisifd->de_info.ddic_rgbw_backlight - backlight_indoor_lgd) * RGBW_LG_CDA_OUTDOOR / backlight_indoor_lgd + RGBW_LG_CDA;
+		hisifd->de_info.pixel_gain_limit = RGBW_LG_FGL - hisifd->de_info.frame_gain_limit;
+		hisifd->de_info.pwm_duty_gain = RGBW_LG_BIT;
+	}
+}
+
+static void set_rgbw_boe_hma(struct hisi_fb_data_type *hisifd) {
+	int backlight_indoor_boe = 0;
+	struct hisi_panel_info *pinfo = NULL;
+	if (hisifd == NULL) {
+		HISI_FB_ERR("hisifd is null!\n");
+		return;
+	}
+
+	pinfo = &(hisifd->panel_info);
+
+	if (pinfo == NULL) {
+		HISI_FB_ERR("pinfo is null!\n");
+		return;
+	}
+
+	backlight_indoor_boe = (int)pinfo->bl_max * RGBW_BOE_RGB_HMA / RGBW_BOE_RGBW_HMA;
+	if (backlight_indoor_boe == 0) {
+		HISI_FB_ERR("backlight_indoor_lgd is err!\n");
+		return;
+	}
+	hisifd->de_info.frame_gain_limit = RGBW_BOE_FGL_HMA;
+	hisifd->de_info.pwm_duty_gain = RGBW_BOE_PDG_HMA;
+	if (hisifd->de_info.ddic_rgbw_backlight < backlight_indoor_boe) {
+		hisifd->de_info.color_distortion_allowance = 0;
+		hisifd->de_info.pixel_gain_limit = 0;
+		hisifd->de_info.rgbw_total_glim = RGBW_BOE_TGL_HMA;
+	} else {
+		hisifd->de_info.color_distortion_allowance = RGBW_BOE_CDA_HMA * (hisifd->de_info.ddic_rgbw_backlight - backlight_indoor_boe) / ((int)pinfo->bl_max - backlight_indoor_boe);
+		hisifd->de_info.rgbw_total_glim = hisifd->de_info.ddic_rgbw_backlight * RGBW_BOE_TGL_HMA / backlight_indoor_boe;
+		hisifd->de_info.pixel_gain_limit = hisifd->de_info.rgbw_total_glim - RGBW_BOE_TGL_HMA;
+	}
+}
+
+static int calc_backlight(struct hisi_fb_data_type *hisifd, int32_t pwm_duty) {
 	int32_t backlight = 0;
 	int32_t delta_pwm_duty = 0;
 	int32_t delta_pwm_duty_abs = 0;
 	delta_pwm_duty = pwm_duty - last_pwm_duty;
 	delta_pwm_duty_abs = abs(delta_pwm_duty);
+
+	if(hisifd == NULL){
+		HISI_FB_ERR("hisifd is null pointer\n");
+		return -1;
+	}
 
 	if ((delta_pwm_duty_abs <= 1) || ((delta_pwm_duty_abs == 3) && (last_delta_pwm_duty_abs==1))) {
 		g_bl_info.cabc_pwm_in = last_pwm_duty;
@@ -453,13 +598,56 @@ static int calc_backlight(struct hisi_fb_data_type *hisifd, int32_t pwm_duty, in
 		backlight = last_backlight;
 		HISI_FB_DEBUG("cabc_rgbw lock_backlight: backlight= %d\n", backlight);
 	} else {
-		if (hisifd->de_info.ddic_panel_id == 1 && !is_rgbw_abnormal) {
-			backlight = ((int32_t)hisifd->panel_info.bl_max) * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision; // for JDI mode 1,2,3,4
-		} else if(hisifd->de_info.ddic_panel_id == 2 && !is_rgbw_abnormal) {
-			backlight = g_bl_info.ap_brightness * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision; //for LG
-		} else if(hisifd->de_info.ddic_panel_id == 3 && !is_rgbw_abnormal) {
-			backlight = ((int32_t)hisifd->panel_info.bl_max) * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision; // for SHARP mode 1,2,3,4
-		} else {
+		if (hisifd->de_info.ddic_panel_id) {
+			HISI_FB_DEBUG("[RGBW] panel_id = %d\n", hisifd->de_info.ddic_panel_id);
+			switch(hisifd->de_info.ddic_panel_id)
+			{
+				case JDI_NT36860C_PANEL_ID:
+				case SHARP_NT36870_PANEL_ID:
+				case JDI_HX83112C_PANLE_ID:
+				case SHARP_HX83112C_PANEL_ID:
+				case JDI_TD4336_PANEL_ID:
+				case SHARP_TD4336_PANEL_ID:
+				case JDI_TD4336_HMA_PANEL_ID:
+				case SHARP_TD4336_HMA_PANEL_ID:
+					if (g_bl_info.blpwm_input_precision > 0) {
+						backlight = ((int32_t)hisifd->panel_info.bl_max) * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision;
+					} else {
+						backlight = g_bl_info.ap_brightness;
+					}
+					break;
+				case LG_NT36870_PANEL_ID:
+				case LG_NT36772A_PANEL_ID:
+					if (g_bl_info.blpwm_input_precision > 0) {
+						backlight = MIN(g_bl_info.ap_brightness * RGBW_LG_RGBW / RGBW_LG_RGB, (int32_t)hisifd->panel_info.bl_max) * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision; //for LG
+					} else {
+						backlight = g_bl_info.ap_brightness;
+					}
+					set_rgbw_lg(hisifd);
+					break;
+				case LG_NT36772A_HMA_PANEL_ID:
+					if (g_bl_info.blpwm_input_precision > 0) {
+						backlight = MIN(g_bl_info.ap_brightness * RGBW_LG_RGBW_HMA / RGBW_LG_RGB_HMA, (int32_t)hisifd->panel_info.bl_max) * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision; //for LG HMA
+					} else {
+						backlight = g_bl_info.ap_brightness;
+					}
+					set_rgbw_lg_hma(hisifd);
+					break;
+				case BOE_HX83112E_HMA_PANEL_ID:
+					if (g_bl_info.blpwm_input_precision > 0) {
+						backlight = MIN(g_bl_info.ap_brightness * RGBW_LG_RGBW_HMA / RGBW_LG_RGB_HMA * g_bl_info.cabc_pwm_in / g_bl_info.blpwm_input_precision, (int32_t)hisifd->panel_info.bl_max); //for BOE HMA
+					} else {
+						backlight = g_bl_info.ap_brightness;
+					}
+					set_rgbw_boe_hma(hisifd);
+					break;
+				default:
+					backlight = g_bl_info.ap_brightness;
+					break;
+			}
+		}
+		else
+		{
 			backlight = g_bl_info.ap_brightness;
 		}
 		last_backlight = backlight;
@@ -487,33 +675,44 @@ static int get_smooth_backlight(int32_t backlight) {
 	return backlight;
 }
 
-static int is_rgbw_bl_abnormal(uint32_t count) {
-
-	if (count == last_rgbw_bl_count) {
-		rgbw_bl_stop_num++;
-		ap_backlight_delta_sum += (g_bl_info.ap_brightness - g_bl_info.last_ap_brightness);
-	} else {
-		rgbw_bl_stop_num = 0;
-		ap_backlight_delta_sum = 0;
+static void rgbw_set(struct hisi_fb_data_type *hisifd, struct hisi_fb_panel_data *pdata)
+{
+	if (hisifd == NULL || pdata == NULL) {
+		HISI_FB_ERR("hisifd or pdata is null!\n");
+		return;
 	}
-
-	if (g_bl_info.last_ap_brightness != g_bl_info.ap_brightness) {
-		backlight_update_counter++;
-	} else {
-		backlight_update_counter = 0;
+	if (hisifd->panel_power_on && pdata->lcd_rgbw_set_func && hisifd->de_info.ddic_panel_id) {
+		down(&hisifd->power_sem);
+		hisifb_vsync_disable_enter_idle(hisifd, true);
+		hisifb_activate_vsync(hisifd);
+		pdata->lcd_rgbw_set_func(hisifd);
+		hisifb_vsync_disable_enter_idle(hisifd, false);
+		hisifb_deactivate_vsync(hisifd);
+		up(&hisifd->power_sem);
 	}
+}
 
-	if (rgbw_abnormal_flag == 0) {
-		rgbw_abnormal_flag = (uint32_t)((rgbw_bl_stop_num > 120) && (backlight_update_counter > 1)
-			&& ((ap_backlight_delta_sum > 30) || (ap_backlight_delta_sum < -30)));
-	} else {
-		rgbw_abnormal_flag = (uint32_t)(rgbw_bl_stop_num != 0);
+static inline void display_engine_bl_debug_print(struct hisi_fb_data_type *hisifd) {
+	static int last_delta = 0;
+	static int last_bl = 0;
+	static int last_bl_out = 0;
+	static int count = 0;
+	int delta = 0;
+
+	delta = hisifd->de_info.blc_enable ? hisifd->de_info.blc_delta : 0;
+	if (hisifb_display_effect_check_bl_value((int)hisifd->bl_level, last_bl) || hisifb_display_effect_check_bl_value(hisifd->de_info.ddic_rgbw_backlight, last_bl_out) || hisifb_display_effect_check_bl_delta(delta, last_delta)) {
+		if (count == 0) {
+			HISI_FB_INFO("[effect] last delta:%d bl:%d->%d\n", last_delta, last_bl, last_bl_out);
+		}
+		count = DISPLAYENGINE_BL_DEBUG_FRAMES;
 	}
-
-	last_rgbw_bl_count = count;
-
-	HISI_FB_DEBUG("cabc_rgbw rgbw_bl_stop_num = %d, backlight_update_counter = %d\n", rgbw_bl_stop_num, backlight_update_counter);
-	return rgbw_abnormal_flag;
+	if (count > 0) {
+		HISI_FB_INFO("[effect] delta:%d bl:%d->%d\n", delta, hisifd->bl_level, hisifd->de_info.ddic_rgbw_backlight);
+		count--;
+	}
+	last_delta = delta;
+	last_bl = (int)hisifd->bl_level;
+	last_bl_out = hisifd->de_info.ddic_rgbw_backlight;
 }
 
 static void get_rgbw_pwmduty_to_update_backlight(struct hisi_fb_data_type *hisifd)
@@ -521,7 +720,15 @@ static void get_rgbw_pwmduty_to_update_backlight(struct hisi_fb_data_type *hisif
 	int32_t backlight = 0;
 	int dimming_stop = 0;
 	int temp_current_pwm_duty = 0;
-	int is_rgbw_abnormal = 0;
+	struct hisi_fb_panel_data *pdata = NULL;
+	struct hisi_panel_info *pinfo = NULL;
+
+	if(hisifd == NULL){
+		HISI_FB_ERR("hisifd is null pointer\n");
+		return;
+	}
+
+	pinfo = &(hisifd->panel_info);
 
 	if ((g_bl_info.last_ap_brightness == 0 && g_bl_info.ap_brightness != 0)) {
 		reset_pwm_buf(0xffff);
@@ -545,16 +752,14 @@ static void get_rgbw_pwmduty_to_update_backlight(struct hisi_fb_data_type *hisif
 			up(&g_bl_info.bl_semaphore);
 			return ;
 		}
-		set_current_state(TASK_INTERRUPTIBLE);//lint !e446  !e666
+		set_current_state(TASK_INTERRUPTIBLE); //lint !e446  !e666
 		up(&g_bl_info.bl_semaphore);
 		schedule();
 	} else {
 		down(&g_bl_info.bl_semaphore);
 
-		is_rgbw_abnormal = is_rgbw_bl_abnormal(hisifd->rgbw_bl_count);
-
-		backlight = calc_backlight(hisifd, temp_current_pwm_duty, is_rgbw_abnormal);
-		HISI_FB_DEBUG("cabc_rgbw backlight = %d is_rgbw_abnormal = %d", backlight, is_rgbw_abnormal);
+		backlight = calc_backlight(hisifd, temp_current_pwm_duty);
+		HISI_FB_DEBUG("cabc_rgbw backlight = %d", backlight);
 
 		//smooth filter for backlight
 		backlight = get_smooth_backlight(backlight);
@@ -568,7 +773,7 @@ static void get_rgbw_pwmduty_to_update_backlight(struct hisi_fb_data_type *hisif
 		g_bl_info.last_ap_brightness = g_bl_info.ap_brightness;
 
 		if (g_bl_info.ap_brightness != 0 && backlight != g_bl_info.last_bl_level) {
-			update_backlight(backlight);
+			update_backlight(hisifd, backlight);
 			g_bl_info.last_bl_level = backlight;
 		}
 		msleep(12);
@@ -578,13 +783,44 @@ static void get_rgbw_pwmduty_to_update_backlight(struct hisi_fb_data_type *hisif
 	if (g_bl_info.ap_brightness == 0) {
 		reset_pwm_buf(0xffff);
 	}
+
+	pdata = dev_get_platdata(&hisifd->pdev->dev);
+	if (NULL == pdata) {
+		HISI_FB_ERR("[effect] pdata is NULL Pointer\n");
+		return;
+	}
+
+	mutex_lock(&g_rgbw_lock);
+	hisifd->de_info.ddic_rgbw_backlight = MIN(MAX((hisifd->de_info.blc_enable ? hisifd->de_info.blc_delta : 0) + (int)hisifd->bl_level, (int)pinfo->bl_min), (int)pinfo->bl_max);
+	HISI_FB_DEBUG("[rgbw] %d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d\n"
+		, hisifd->de_info.ddic_panel_id
+		, hisifd->de_info.ddic_rgbw_mode
+		, hisifd->de_info.rgbw_saturation_control
+		, hisifd->de_info.frame_gain_limit
+		, hisifd->de_info.color_distortion_allowance
+		, hisifd->de_info.pixel_gain_limit
+		, hisifd->de_info.pwm_duty_gain
+		, hisifd->de_info.rgbw_total_glim
+		, hisifd->de_info.ddic_rgbw_backlight
+		, hisifd->de_info.blc_delta
+		, hisifd->bl_level
+	);
+
+	rgbw_set(hisifd, pdata);
+
+	mutex_unlock(&g_rgbw_lock);
 }
 
 static int cabc_pwm_thread(void *p)
 {
 
 	struct hisi_fb_data_type *hisifd = NULL;
+
 	hisifd = (struct hisi_fb_data_type *)p;
+	if(hisifd == NULL){
+		HISI_FB_ERR("hisifd is null pointer\n");
+		return -1;
+	}
 
 	while(!kthread_should_stop()) {
 		if (rgbw_lcd_support)
@@ -593,7 +829,7 @@ static int cabc_pwm_thread(void *p)
 		}
 	    else
 		{
-			get_ap_dimming_to_update_backlight();
+			get_ap_dimming_to_update_backlight(hisifd);
 		}
 	}
 	return 0;
@@ -685,6 +921,18 @@ static int hisi_blpwm_input_disable(struct hisi_fb_data_type *hisifd)
 	return 0;
 }
 
+static bool updateCabcPwm_stop(struct hisi_fb_data_type *hisifd)
+{
+	bool pwm_stop = true;
+	if (NULL == hisifd) {
+		HISI_FB_ERR("hisifd is NULL");
+		return pwm_stop;
+	}
+	pwm_stop = (!g_blpwm_on || !hisifd->bl_level || !hisifd->backlight.bl_updated || g_bl_info.ap_brightness == 0);
+	HISI_FB_DEBUG("updateCabcPwm_stop:%d",pwm_stop);
+	return pwm_stop;
+}
+
 int updateCabcPwm(struct hisi_fb_data_type *hisifd)
 {
 	char __iomem *blpwm_base = NULL;
@@ -714,7 +962,7 @@ int updateCabcPwm(struct hisi_fb_data_type *hisifd)
 		return -EINVAL;
 	}
 
-	if (!g_blpwm_on || !hisifd->bl_level || !hisifd->backlight.bl_updated)
+	if (updateCabcPwm_stop(hisifd))
 		return 0;
 
 
@@ -758,13 +1006,39 @@ int updateCabcPwm(struct hisi_fb_data_type *hisifd)
 	}
 
 err_out:
-	if (cabc_is_open == 0 && hiace_refresh) {
-		update_backlight(g_bl_info.ap_brightness);
-	}
 
 	return ret;
 
 }
+
+void hisi_blpwm_fill_light(uint32_t backlight)
+{
+	char __iomem *blpwm_base = NULL;
+	uint32_t brightness = 0;
+	uint32_t bl_level = backlight;
+
+	blpwm_base = hisifd_blpwm_base;
+	if (!blpwm_base) {
+		HISI_FB_ERR("blpwm_base is null!\n");
+		return;
+	}
+
+	down(&g_bl_info.bl_semaphore);
+
+	/* notify dubai module to update brightness */
+	dubai_update_brightness(backlight);
+
+	HISI_FB_DEBUG("hisi_blpwm_fill_light:bl_level=%d, backlight=%d, blpwm_out_precision=%d, bl_max=%d\n",
+			bl_level, backlight, g_bl_info.blpwm_out_precision, g_bl_info.bl_max);
+
+	brightness = (bl_level << 16) | (g_bl_info.blpwm_out_precision - bl_level);
+	outp32(blpwm_base + BLPWM_OUT_CFG, brightness);
+
+	up(&g_bl_info.bl_semaphore);
+
+	return;
+}
+
 
 int hisi_blpwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level)
 {
@@ -830,13 +1104,16 @@ int hisi_blpwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level
 
 		if(bl_level > 0){
 			bl_level= bl_level * g_bl_info.current_cabc_pwm / pinfo->blpwm_input_precision;
-			bl_level =  bl_level < g_bl_info.bl_min ? g_bl_info.bl_min : bl_level ;
+			bl_level =  bl_level < g_bl_info.bl_min ? g_bl_info.bl_min : bl_level ; //lint !e574
 		}
 		g_bl_info.last_bl_level = bl_level;
 		HISI_FB_DEBUG("cabc:ap_brightness=%d, current_cabc_pwm=%d, blpwm_input_precision=%d, bl_level=%d\n",
 				g_bl_info.ap_brightness, g_bl_info.current_cabc_pwm,
 				pinfo->blpwm_input_precision, bl_level);
 	}
+
+	/* notify dubai module to update brightness */
+	dubai_update_brightness(bl_level);
 
 	if ((g_bl_info.bl_ic_ctrl_mode >= REG_ONLY_MODE ) && (g_bl_info.bl_ic_ctrl_mode <= I2C_ONLY_MODE)) {
 		bl_level = bl_lvl_map(bl_level);
@@ -854,7 +1131,8 @@ int hisi_blpwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level
 		return 0;
 	} else if (BLPWM_AND_CABC_MODE == g_bl_info.bl_ic_ctrl_mode) {
 		lp8556_set_backlight_init(bl_level);
-	}else if (COMMON_IC_MODE == g_bl_info.bl_ic_ctrl_mode) {
+	}
+	 else if (COMMON_IC_MODE == g_bl_info.bl_ic_ctrl_mode) {
 		int return_value = -1;
 		switch(g_bl_config.bl_level) {
 			case BL_MAX_12BIT:
@@ -866,13 +1144,11 @@ int hisi_blpwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level
 				break;
 		};
 		return_value = hisi_blpwm_bl_callback(bl_level);
-		if(0 == return_value)
-		{
+		if (0 == return_value) {
 			up(&g_bl_info.bl_semaphore);
 			return 0;
 		}
 	}
-
 	bl_level = get_backlight_level(bl_level);
 
 	brightness = (bl_level << 16) | (g_bl_info.blpwm_out_precision - bl_level);
@@ -999,6 +1275,7 @@ int hisi_blpwm_off(struct platform_device *pdev)
 static int hisi_blpwm_probe(struct platform_device *pdev)
 {
 	struct device_node *np = NULL;
+	struct device *dev = NULL;
 	int ret = 0;
 
 	HISI_FB_DEBUG("+.\n");
@@ -1009,10 +1286,11 @@ static int hisi_blpwm_probe(struct platform_device *pdev)
 	}
 
 	g_blpwm_pdev = pdev;
+	dev = &pdev->dev;
 
 	np = of_find_compatible_node(NULL, NULL, DTS_COMP_BLPWM_NAME);
 	if (!np) {
-		HISI_FB_ERR("NOT FOUND device node %s!\n", DTS_COMP_BLPWM_NAME);
+		dev_err(dev, "NOT FOUND device node %s!\n", DTS_COMP_BLPWM_NAME);
 		ret = -ENXIO;
 		goto err_return;
 	}
@@ -1020,14 +1298,14 @@ static int hisi_blpwm_probe(struct platform_device *pdev)
 	/* get blpwm reg base */
 	hisifd_blpwm_base = of_iomap(np, 0);
 	if (!hisifd_blpwm_base) {
-		HISI_FB_ERR("failed to get blpwm_base resource.\n");
+		dev_err(dev, "failed to get blpwm_base resource.\n");
 		ret = -ENXIO;
 		goto err_return;
 	}
 
 	ret = of_property_read_u32(np, "fpga_flag", &g_blpwm_fpga_flag);
 	if (ret) {
-		HISI_FB_ERR("failed to get fpga_flag resource.\n");
+		dev_err(dev, "failed to get fpga_flag resource.\n");
 		ret = -ENXIO;
 		goto err_return;
 	}
@@ -1037,21 +1315,20 @@ static int hisi_blpwm_probe(struct platform_device *pdev)
 		ret = pinctrl_cmds_tx(pdev, blpwm_pinctrl_init_cmds,
 				ARRAY_SIZE(blpwm_pinctrl_init_cmds));
 		if (ret != 0) {
-			HISI_FB_ERR("Init blpwm pinctrl failed! ret=%d.\n", ret);
+			dev_err(dev, "Init blpwm pinctrl failed! ret=%d.\n", ret);
 			goto err_return;
 		}
 
 		/* get blpwm clk resource */
 		g_dss_blpwm_clk = of_clk_get(np, 0);
 		if (IS_ERR(g_dss_blpwm_clk)) {
-			HISI_FB_ERR("%s clock not found: %d!\n",
+			dev_err(dev, "%s clock not found: %d!\n",
 					np->name, (int)PTR_ERR(g_dss_blpwm_clk));
 			ret = -ENXIO;
 			goto err_return;
 		}
 
-
-		HISI_FB_INFO("dss_blpwm_clk:[%lu]->[%lu].\n",
+		dev_info(dev, "dss_blpwm_clk:[%lu]->[%lu].\n",
 				DEFAULT_PWM_CLK_RATE, clk_get_rate(g_dss_blpwm_clk));
 	}
 

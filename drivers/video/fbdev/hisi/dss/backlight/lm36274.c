@@ -32,13 +32,108 @@ static unsigned int g_reg_val[LM36274_RW_REG_MAX] = {0};
 static int g_bl_level_enhance_mode = 0;
 static int g_hidden_reg_support = 0;
 #define MAX_TRY_NUM 3
+#define BL_MAX 2047
 static int g_force_resume_bl_flag = RESUME_IDLE;
 #define MIN_BL_RESUME_TIMMER 1
 #define MAX_BL_RESUME_TIMMER 400
 #define PROTECT_BL_RESUME_TIMMER 28
+
+#define REG_REVISION 0x01
+#define REG_MAX 0x14
+#define LOG_LEVEL_INFO 8
+
 static int g_resume_bl_duration = 0;  /* default not support auto resume*/
 static enum hrtimer_restart lm36274_bl_resume_hrtimer_fnc(struct hrtimer *timer);
 static void lm36274_bl_resume_workqueue_handler(struct work_struct *work);
+extern int bl_lvl_map(int level);
+
+struct backlight_information {
+	/* whether support lm36274 or not */
+	int lm36274_support;
+	/* which i2c bus controller lm36274 mount */
+	int lm36274_i2c_bus_id;
+	/* lm36274 hw_en gpio */
+	int lm36274_hw_en_gpio;
+	int lm36274_reg[LM36274_RW_REG_MAX];
+};
+
+static struct backlight_information bl_info;
+
+static char *lm36274_dts_string[LM36274_RW_REG_MAX] = {
+	"lm36274_bl_config_1",
+	"lm36274_bl_config_2",
+	"lm36274_auto_freq_low",
+	"lm36274_auto_freq_high",
+	"lm36274_display_bias_config_1",
+	"lm36274_display_bias_config_2",
+	"lm36274_display_bias_config_3",
+	"lm36274_lcm_boost_bias",
+	"lm36274_vpos_bias",
+	"lm36274_vneg_bias",
+	"lm36274_bl_option_1",
+	"lm36274_bl_option_2",
+	"lm36274_bl_en",
+};
+
+static unsigned int lm36274_reg_addr[LM36274_RW_REG_MAX] = {
+	REG_BL_CONFIG_1,
+	REG_BL_CONFIG_2,
+	REG_AUTO_FREQ_LOW,
+	REG_AUTO_FREQ_HIGH,
+	REG_DISPLAY_BIAS_CONFIG_1,
+	REG_DISPLAY_BIAS_CONFIG_2,
+	REG_DISPLAY_BIAS_CONFIG_3,
+	REG_LCM_BOOST_BIAS,
+	REG_VPOS_BIAS,
+	REG_VNEG_BIAS,
+	REG_BL_OPTION_1,
+	REG_BL_OPTION_2,
+	REG_BL_ENABLE,
+};
+
+static struct lm36274_vsp_vsn_voltage lm36274_voltage_table[] = {
+	{4000000,LM36274_VOL_400},
+	{4050000,LM36274_VOL_405},
+	{4100000,LM36274_VOL_410},
+	{4150000,LM36274_VOL_415},
+	{4200000,LM36274_VOL_420},
+	{4250000,LM36274_VOL_425},
+	{4300000,LM36274_VOL_430},
+	{4350000,LM36274_VOL_435},
+	{4400000,LM36274_VOL_440},
+	{4450000,LM36274_VOL_445},
+	{4500000,LM36274_VOL_450},
+	{4550000,LM36274_VOL_455},
+	{4600000,LM36274_VOL_460},
+	{4650000,LM36274_VOL_465},
+	{4700000,LM36274_VOL_470},
+	{4750000,LM36274_VOL_475},
+	{4800000,LM36274_VOL_480},
+	{4850000,LM36274_VOL_485},
+	{4900000,LM36274_VOL_490},
+	{4950000,LM36274_VOL_495},
+	{5000000,LM36274_VOL_500},
+	{5050000,LM36274_VOL_505},
+	{5100000,LM36274_VOL_510},
+	{5150000,LM36274_VOL_515},
+	{5200000,LM36274_VOL_520},
+	{5250000,LM36274_VOL_525},
+	{5600000,LM36274_VOL_560},
+	{5650000,LM36274_VOL_565},
+	{5700000,LM36274_VOL_570},
+	{5750000,LM36274_VOL_575},
+	{5800000,LM36274_VOL_580},
+	{5850000,LM36274_VOL_585},
+	{5900000,LM36274_VOL_590},
+	{5950000,LM36274_VOL_595},
+	{6000000,LM36274_VOL_600},
+	{6050000,LM36274_VOL_605},
+	{6400000,LM36274_VOL_640},
+	{6450000,LM36274_VOL_645},
+	{6500000,LM36274_VOL_650},
+};
+
+static struct backlight_work_mode_reg_info g_bl_work_mode_reg_indo;
 
 /*
 ** for debug, S_IRUGO
@@ -52,6 +147,11 @@ static void lm36274_get_target_voltage(int *vpos_target,int *vneg_target)
 {
 	int i = 0;
 	int j = 0;
+
+	if((vpos_target == NULL) || (vneg_target == NULL)){
+		LM36274_ERR("vpos_target or vneg_target is NULL pointer \n");
+		return;
+	}
 
 	for (i = 0;i < sizeof(lm36274_voltage_table) / sizeof(struct lm36274_vsp_vsn_voltage);i++) {
 		if (lm36274_voltage_table[i].voltage == lcdkit_info.panel_infos.lcd_vsp) {
@@ -92,6 +192,11 @@ static int lm36274_parse_dts(struct device_node *np)
 	int vpos_target = 0;
 	int vneg_target = 0;
 
+	if(np == NULL){
+		LM36274_ERR("np is NULL pointer \n");
+		return -1;
+	}
+
 	for (i = 0;i < LM36274_RW_REG_MAX;i++ ) {
 		ret = of_property_read_u32(np, lm36274_dts_string[i], &bl_info.lm36274_reg[i]);
 		if (ret < 0) {
@@ -119,8 +224,13 @@ static int lm36274_parse_dts(struct device_node *np)
 static int lm36274_config_write(struct lm36274_chip_data *pchip,
 			unsigned int reg[],unsigned int val[],unsigned int size)
 {
-	unsigned int ret = 0;
+	int ret = 0;
 	unsigned int i = 0;
+
+	if((pchip == NULL) || (reg == NULL) || (val == NULL)){
+		LM36274_ERR("pchip or reg or val is NULL pointer \n");
+		return -1;
+	}
 
 	for(i = 0;i < size;i++) {
 		ret = regmap_write(pchip->regmap, reg[i], val[i]);
@@ -139,8 +249,13 @@ exit:
 static int lm36274_config_read(struct lm36274_chip_data *pchip,
 			unsigned int reg[],unsigned int val[],unsigned int size)
 {
-	unsigned int ret = 0;
+	int ret = 0;
 	unsigned int i = 0;
+
+	if((pchip == NULL) || (reg == NULL) || (val == NULL)){
+		LM36274_ERR("pchip or reg or val is NULL pointer \n");
+		return -1;
+	}
 
 	for(i = 0;i < size;i++) {
 		ret = regmap_read(pchip->regmap, reg[i],&val[i]);
@@ -160,6 +275,11 @@ static void lm36274_bl_mode_reg_init(unsigned int reg[],unsigned int val[],unsig
 {
 	unsigned int i;
 	unsigned int reg_element_num = 0;
+
+	if((reg == NULL) || (val == NULL)){
+		LM36274_ERR("reg or val is NULL pointer\n");
+		return;
+	}
 
 	LM36274_INFO("lm36274_bl_mode_reg_init in \n");
 	memset(&g_bl_work_mode_reg_indo, 0, sizeof(struct backlight_work_mode_reg_info));
@@ -251,6 +371,11 @@ static int lm36274_set_hidden_reg(struct lm36274_chip_data *pchip)
 	int ret = 0;
 	unsigned int val = 0;
 
+	if(pchip == NULL){
+		LM36274_ERR("pchip is NULL pointer\n");
+		return -1;
+	}
+
 	ret = regmap_write(pchip->regmap, REG_SET_SECURITYBIT_ADDR, REG_SET_SECURITYBIT_VAL);
 	if (ret < 0) {
 		LM36274_ERR("write lm36274_set_hidden_reg register 0x%x failed\n",REG_SET_SECURITYBIT_ADDR);
@@ -303,10 +428,15 @@ out:
 static int lm36274_chip_init(struct lm36274_chip_data *pchip)
 {
     int ret = -1;
-    struct device_node *np;
+    struct device_node *np = NULL;
     unsigned int enable_reg = 0;
 
     LM36274_INFO("in!\n");
+
+	if(pchip == NULL){
+		LM36274_ERR("pchip is NULL pointer\n");
+		return -1;
+	}
 
     memset(&bl_info, 0, sizeof(struct backlight_information));
 
@@ -443,6 +573,7 @@ static int lm36274_check_ovp_error(void)
 err_out:
     return ret;
 }
+
 /**
  * lm36274_set_backlight_reg(): Set Backlight working mode
  *
@@ -451,9 +582,9 @@ err_out:
  * A value of zero will be returned on success, a negative errno will
  * be returned in error cases.
  */
-ssize_t lm36274_set_backlight_reg(uint32_t bl_level)
+int lm36274_set_backlight_reg(unsigned int bl_level)
 {
-	ssize_t ret = -1;
+	int ret = -1;
 	uint32_t level = 0;
 	int bl_msb = 0;
 	int bl_lsb = 0;
@@ -470,6 +601,8 @@ ssize_t lm36274_set_backlight_reg(uint32_t bl_level)
 		LM36274_INFO("Now in test mode\n");
 		return 0;
 	}
+
+
 	LM36274_INFO("lm36274_set_backlight_reg bl_level = %u \n", bl_level);
 
 	//blkit_force_resume_reg_proc();
@@ -613,10 +746,17 @@ static ssize_t lm36274_reg_bl_store(struct device *dev,
 					const char *buf, size_t size)
 {
 	ssize_t ret = -1;
-	struct lm36274_chip_data *pchip = dev_get_drvdata(dev);
+	struct lm36274_chip_data *pchip = NULL;
 	unsigned int bl_level = 0;
 	unsigned int bl_msb = 0;
 	unsigned int bl_lsb = 0;
+
+	if (!dev)
+		return snprintf((char *)buf, PAGE_SIZE, "dev is null\n");
+
+	pchip = dev_get_drvdata(dev);
+	if (!pchip)
+		return snprintf((char *)buf, PAGE_SIZE, "data is null\n");
 
 	ret = kstrtouint(buf, 10, &bl_level);
 	if (ret) {
@@ -701,10 +841,17 @@ static ssize_t lm36274_reg_store(struct device *dev,
 					const char *buf, size_t size)
 {
 	ssize_t ret = -1;
-	struct lm36274_chip_data *pchip = dev_get_drvdata(dev);
+	struct lm36274_chip_data *pchip = NULL;
 	unsigned int reg = 0;
 	unsigned int mask = 0;
 	unsigned int val = 0;
+
+	if (!dev)
+		return snprintf((char *)buf, PAGE_SIZE, "dev is null\n");
+
+	pchip = dev_get_drvdata(dev);
+	if (!pchip)
+		return snprintf((char *)buf, PAGE_SIZE, "data is null\n");
 
 	ret = sscanf(buf, "reg=0x%x, mask=0x%x, val=0x%x",&reg,&mask,&val);
 	if (ret < 0) {
@@ -1005,15 +1152,27 @@ static const struct attribute_group lm36274_group = {
 	.attrs = lm36274_attributes,
 };
 
+
 static int lm36274_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
-	struct i2c_adapter *adapter = client->adapter;
+	struct i2c_adapter *adapter = NULL;
 	struct lm36274_chip_data *pchip = NULL;
 	int ret = -1;
 	unsigned int val = 0;
 
 	LM36274_INFO("in!\n");
+
+	if(client == NULL){
+		LM36274_ERR("client is NULL pointer\n");
+		return -1;
+	}
+
+	adapter = client->adapter;
+	if(adapter == NULL){
+		LM36274_ERR("adapter is NULL pointer\n");
+		return -1;
+	}
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "i2c functionality check fail.\n");

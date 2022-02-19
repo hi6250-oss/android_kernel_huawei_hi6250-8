@@ -15,77 +15,50 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/delay.h>
+#include <linux/timer.h>
+#include <linux/mutex.h>
+#include <linux/workqueue.h>
+#include <linux/power/hisi/coul/hisi_coul_drv.h>
+#include "ina231.h"
 
 struct class *ina231_class;
+struct ina231_data *g_idata = NULL;
 
-/* common register definitions */
-#define INA231_CONFIG			0x00
-#define INA231_SHUNT_VOLTAGE	0x01 /* readonly */
-#define INA231_BUS_VOLTAGE	0x02 /* readonly */
-#define INA231_POWER			0x03 /* readonly */
-#define INA231_CURRENT			0x04 /* readonly */
-#define INA231_CALIBRATION		0x05
-#define INA231_MASK_ENABLE	0x06
-#define INA231_ALERT_LIMIT		0x07
 
-/* register count */
-#define INA231_MAX_REGS		8
-
-struct ina231_config {
-	u16 config_sleep_in;
-	u16 config_reset;
-	u16 config_work;
-	u16 calibrate_content;
-	u16 mask_enable_content;
-	u16 alert_limit_content;
-
-	int shunt_lsb;
-	int shunt_max;
-	int bus_voltage_lsb;	/* uV */
-	int bus_voltage_max;
-
-	int current_lsb;	/* uA */
-	int current_max;
-	int power_lsb;		/* uW */
-	int power_max;
-};
-
-struct ina231_data {
-	struct device *dev;
-	struct i2c_client *client;
-	const struct ina231_config *config;
-	int type;
-	u16 regs[INA231_MAX_REGS];
-};
+/*
+** for debug, S_IRUGO
+** /sys/module/hisifb/parameters
+*/
+unsigned ina231_msg_level = INA231_DEBUG_LEVEL;
+module_param_named(debug_ina231_msg_level, ina231_msg_level, int, 0640);
+MODULE_PARM_DESC(debug_ina231_msg_level, "ADC ina231 msg level");
 
 static const struct ina231_config ina231_config[] = {
-/*avdd*/
 	[0] = {
-		.config_sleep_in = 0x4124,
+		.config_sleep_in = 0x4D34,
 		.config_reset = 0x1000,
-		.config_work = 0x4377,
-		.calibrate_content = 0x1105,
+		.config_work = 0x4D37,
+		.calibrate_content = 0x2800,
 		.mask_enable_content = 0x0,
 		.alert_limit_content = 0x0,
 
-		.shunt_lsb = 2500,  /* 2500nV/bit */
-		.bus_voltage_lsb = 1250, /* 1250uV/bit */
-		.current_lsb = 25, /* 25uA/bit */
-		.power_lsb = 625, /* 625 uW/bit */
+		.shunt_lsb = 2500,
+		.bus_voltage_lsb = 1250,
+		.current_lsb = 50,
+		.power_lsb = 1250,
 	},
-/*elvdd*/
 	[1] = {
-		.config_sleep_in = 0x4124,
+		.config_sleep_in = 0x4D34,
 		.config_reset = 0x1000,
-		.config_work = 0x4377,
-		.calibrate_content = 0x5000,
+		.config_work = 0x4D37,
+		.calibrate_content = 0x2800,
 		.mask_enable_content = 0x0,
 		.alert_limit_content = 0x0,
 
-		.shunt_lsb = 2500,  /* 2500nV/bit */
-		.bus_voltage_lsb = 1250, /* 1250uV/bit */
-		.current_lsb = 25, /* 25uA/bit */
-		.power_lsb = 625, /* 625 uW/bit */
+		.shunt_lsb = 2500,
+		.bus_voltage_lsb = 1250,
+		.current_lsb = 50,
+		.power_lsb = 1250,
 	},
 };
 
@@ -94,46 +67,54 @@ static ssize_t ina231_show_value(struct device *dev,
 {
 	struct ina231_data *idata = NULL;
 	struct i2c_client *client = NULL;
-	int shunt_lsb = 0; /* 0nV/bit */
-	int bus_voltage_lsb = 0; /* 0mV/bit */
-	int current_lsb = 0; /* 0uA/bit */
-	int power_lsb = 0; /* 0uW/bit */
-	int i = 0;
+	u64 acc_power = 0;
+	u64 acc_current = 0;
+	int monitor_num = 0;
 
-	if (!dev)
+	if (NULL == buf){
+		INA231_ERR("NULL_PTR ERROR!\n");
+		return -EINVAL;
+	}
+	if (!dev) {
+		INA231_ERR("dev is NULL!\n");
 		return snprintf(buf, PAGE_SIZE, "dev is null\n");
-
+	}
 	idata = dev_get_drvdata(dev);
-	if (!idata)
+	if (!idata) {
+		INA231_ERR("data is NULL!\n");
 		return snprintf(buf, PAGE_SIZE, "data is null\n");
-
+	}
 	client = idata->client;
-	if(!client)
+	if(!client) {
+		INA231_ERR("client is NULL!\n");
 		return snprintf(buf, PAGE_SIZE, "client is null\n");
+	}
+	if (idata->flag & ALREADY_READ) {
+		INA231_INFO("Data already read!\n");
+		return snprintf(buf, PAGE_SIZE, "Data already read!\n");
+	}
 
-	for (i = 0; i < INA231_MAX_REGS; i ++)
-		idata->regs[i]= i2c_smbus_read_word_swapped(client, i);
+	mutex_lock(&idata->mutex_lock);
+	if (idata->num > 1) {
+		monitor_num = idata->num - 1;
+		acc_power = idata->acc_power;
+		acc_current = idata->acc_current;
+	}
 
-	shunt_lsb = idata->config->shunt_lsb;
-	bus_voltage_lsb = idata->config->bus_voltage_lsb;
-	power_lsb = idata->config->power_lsb;
-	current_lsb = idata->config->current_lsb;
+	if (idata->flag == 0) {
+		idata->num = 1;
+		idata->acc_power = 0;
+		idata->acc_current = 0;
+		idata->flag |= ALREADY_READ;
+		i2c_smbus_write_word_swapped(idata->client, INA231_CONFIG, idata->config->config_sleep_in);
+	}
+	mutex_unlock(&idata->mutex_lock);
 
-	printk("[client addr=0x%x]shunt_lsb=%d(nV/bit), bus_voltage_lsb=%d(uV/bit),power_lsb=%d(uW/bit),current_lsb=%d(uA/bit)\n",
-				client->addr, shunt_lsb, bus_voltage_lsb, power_lsb, current_lsb);
-	printk("shunt_read=0x%x, bus_voltage_read=0x%x,power_read=0x%x,current_read=0x%x\n",
-				idata->regs[INA231_SHUNT_VOLTAGE], idata->regs[INA231_BUS_VOLTAGE], idata->regs[INA231_POWER], idata->regs[INA231_CURRENT]);
-	printk("Shunt_voltage:%ld(nV), Bus_voltage:%ld(uV), Power:%ld(uW), Current:%ld(uA), Mask_en:0x%0x\n",
-				((long)(s16)idata->regs[INA231_SHUNT_VOLTAGE])*shunt_lsb,
-				((long)(s16)idata->regs[INA231_BUS_VOLTAGE])*bus_voltage_lsb,
-				((long)(s16)idata->regs[INA231_POWER])*power_lsb,
-				((long)(s16)idata->regs[INA231_CURRENT])*current_lsb,
-				(u16)idata->regs[INA231_MASK_ENABLE]);
-
-	return snprintf(buf, PAGE_SIZE, "Bus_voltage:%ld, Power:%ld, Current:%ld\n",
-				((long)(s16)idata->regs[INA231_BUS_VOLTAGE])*bus_voltage_lsb,
-				((long)(s16)idata->regs[INA231_POWER])*power_lsb,
-				((long)(s16)idata->regs[INA231_CURRENT])*current_lsb);
+	INA231_INFO("Power: %lld, Current:%lld, Num:%d\n", acc_power, (acc_current * idata->config->current_lsb), monitor_num);
+	return snprintf(buf, PAGE_SIZE, "Power:%lld, Current:%lld, Num:%d\n",
+				acc_power,
+				(acc_current * idata->config->current_lsb),
+				monitor_num);
 }
 
 static ssize_t ina231_store_debug(struct device *dev, struct device_attribute *attr,
@@ -147,31 +128,36 @@ static ssize_t ina231_store_debug(struct device *dev, struct device_attribute *a
 	u16 mask_en = 0;
 	u16 alert_limit = 0;
 
+	if (NULL == buf){
+		INA231_ERR("NULL_PTR ERROR!\n");
+		return -EINVAL;
+	}
+
 	ret = sscanf(buf, "config=0x%x, calibration=0x%x, mask_en=0x%x, alert_limit=0x%x", 
-				&config, &calibration, &mask_en, &alert_limit);
+				(unsigned int *)&config, (unsigned int *)&calibration, (unsigned int *)&mask_en, (unsigned int *)&alert_limit);
 	if (ret < 0) {
-		printk("check your input!!!\n");
+		INA231_ERR("check your input!\n");
 		return count;
 	}
 
 	if (!dev) {
-		printk("dev is null\n");
+		INA231_ERR("dev is null\n!\n");
 		return -1;
 	}
 
 	idata = dev_get_drvdata(dev);
 	if (!idata) {
-		printk("idata is null\n");
+		INA231_ERR("idata is null\n!\n");
 		return -1;
 	}
 
 	client = idata->client;
 	if(!client) {
-		printk("client is null\n");
+		INA231_ERR("client is null\n!\n");
 		return -1;
 	}
 
-	printk("[client addr=0x%x] config=0x%x, calibration=0x%x, mask_en=0x%x, alert_limit=0x%x\n",
+	INA231_INFO("[client addr=0x%x] config=0x%x, calibration=0x%x, mask_en=0x%x, alert_limit=0x%x\n",
 			client->addr, config, calibration, mask_en, alert_limit);
 
 	/* configuration */
@@ -195,29 +181,32 @@ static ssize_t ina231_store_set(struct device *dev, struct device_attribute *att
 	ssize_t ret = count;
 
 	if (!dev) {
-		printk("dev is NULL!!!\n");
+		INA231_ERR("dev is NULL!!!\n");
 		return ret;
 	}
-
+	if (NULL == buf){
+		INA231_ERR("NULL_PTR ERROR!\n");
+		return -EINVAL;
+	}
 	ret = sscanf(buf, "%u", &value);
 	if (ret < 0) {
-		printk("check your input!!!\n");
+		INA231_ERR("check your input!!!\n");
 		ret = count;
 		return ret;
 	}
 
 	idata = dev_get_drvdata(dev);
 	if (!idata) {
-		printk("idata is NULL!!!\n");
+		INA231_ERR("idata is NULL!!!\n");
 		return ret;
 	}
 	client = idata->client;
 	if(!client) {
-		printk("client is NULL!!!\n");
+		INA231_ERR("client is NULL!!!\n");
 		return ret;
 	}
 
-	printk("[client addr=0x%x]config_sleep_in:0x%x, config_work:0x%x, calibration:0x%x, mask_en:0x%x, alert_limit:0x%x\n",
+	INA231_INFO("[client addr=0x%x]config_sleep_in:0x%x, config_work:0x%x, calibration:0x%x, mask_en:0x%x, alert_limit:0x%x\n",
 			client->addr,
 			idata->config->config_sleep_in,
 			idata->config->config_work,
@@ -226,7 +215,7 @@ static ssize_t ina231_store_set(struct device *dev, struct device_attribute *att
 			idata->config->alert_limit_content);
 
 	if (value) {
-		printk("goto work mode, starting testing\n");
+		INA231_INFO("goto work mode, starting testing\n");
 		/* configuration */
 		i2c_smbus_write_word_swapped(client, INA231_CONFIG, idata->config->config_work);
 		/* set calibrate*/
@@ -236,7 +225,7 @@ static ssize_t ina231_store_set(struct device *dev, struct device_attribute *att
 		/*set alert limit*/
 		i2c_smbus_write_word_swapped(client, INA231_ALERT_LIMIT, idata->config->alert_limit_content);
 	} else {
-		printk("goto sleep mode, ending testing\n");
+		INA231_INFO("goto sleep mode, ending testing\n");
 		/* configuration to sleep */
 		i2c_smbus_write_word_swapped(client, INA231_CONFIG, idata->config->config_sleep_in);
 	}
@@ -265,6 +254,124 @@ static const struct attribute_group ina231_group = {
 	.attrs = ina231_attributes,
 };
 
+static void ina231_monitor_wq_handler(struct work_struct *work)
+{
+	int battery_voltage = 0;
+	struct ina231_data *idata = NULL;
+	static int s_battery_voltage = 4000;
+	int current_data = 0;
+	unsigned long expires = 0;
+	int ret = 0;
+
+	idata = container_of(work, struct ina231_data, wq);
+	if (NULL == idata) {
+		INA231_ERR("idata is NULL\n");
+		return;
+	}
+
+	INA231_DEBUG("enter!\n");
+	if (idata->flag & LCD_RESUME) {
+		/* communication check and reset device*/
+		ret = i2c_smbus_write_word_swapped(idata->client, INA231_CONFIG, idata->config->config_reset);
+		if (ret < 0) {
+			INA231_ERR("Reset failed\n");
+			return;
+		}
+		msleep(20);
+		/* configuration */
+		ret = i2c_smbus_write_word_swapped(idata->client, INA231_CONFIG, idata->config->config_work);
+		if (ret < 0) {
+			INA231_ERR("Setting configuration failed\n");
+			return;
+		}
+		/* set calibrate*/
+		ret = i2c_smbus_write_word_swapped(idata->client, INA231_CALIBRATION, idata->config->calibrate_content);
+		if (ret < 0) {
+			INA231_ERR("Setting calibrate failed\n");
+			return;
+		}
+
+		mutex_lock(&idata->mutex_lock);
+		idata->num = 1;
+		idata->flag &= ~LCD_RESUME;
+		idata->flag &= ~ALREADY_READ;
+		idata->acc_current = 0;
+		idata->acc_power = 0;
+		mutex_unlock(&idata->mutex_lock);
+		expires = jiffies + INA231_SAMPLE_TIME * HZ;
+		mod_timer(&(idata->ina321_timer), expires);
+	}else {
+		current_data = i2c_smbus_read_word_swapped(idata->client, INA231_CURRENT);
+		if (current_data < 0) {
+			INA231_ERR("Reading i2c data failed!\n");
+			return;
+		}
+		INA231_DEBUG("current_data = %d\n", current_data);
+		mutex_lock(&idata->mutex_lock);
+		battery_voltage = hisi_battery_voltage();
+		if (battery_voltage) {
+			s_battery_voltage = battery_voltage;
+		} else {
+			INA231_ERR("Read hisi_battery_voltage failed!\n");
+		}
+		idata->acc_power += ((u64)s_battery_voltage * current_data * idata->config->current_lsb) / INA231_POWER_UNIT_CONVERSION;
+		idata->acc_current += current_data;
+		INA231_DEBUG("idata->acc_current = %lld\n", idata->acc_current);
+		idata->num++;
+		mutex_unlock(&idata->mutex_lock);
+	}
+}
+
+static void ina231_monitor_timer_func(unsigned long data)
+{
+	unsigned long expires = 0;
+	struct ina231_data *idata = NULL;
+
+	idata = (struct ina231_data *)data;
+	if (NULL == idata) {
+		INA231_ERR("idata is NULL\n");
+		return;
+	}
+
+	INA231_DEBUG("enter!\n");
+	schedule_work(&(idata->wq));
+	expires = jiffies + INA231_SAMPLE_TIME * HZ;
+	mod_timer(&(idata->ina321_timer), expires);
+}
+
+int ina231_power_monitor_on(void)
+{
+	if (NULL == g_idata) {
+		INA231_DEBUG("ina231 not register!");
+		return INA231_OK;
+	}
+
+	INA231_DEBUG("enter!\n");
+	mutex_lock(&g_idata->mutex_lock);
+	g_idata->flag = 0;
+	g_idata->flag |= LCD_ON | LCD_RESUME | ALREADY_READ;
+	mutex_unlock(&g_idata->mutex_lock);
+	schedule_work(&(g_idata->wq));
+	return INA231_OK;
+}
+
+int ina231_power_monitor_off(void)
+{
+	if (NULL == g_idata) {
+		INA231_DEBUG("ina231 not register!");
+		return INA231_OK;
+	}
+
+	INA231_DEBUG("enter!\n");
+	mutex_lock(&g_idata->mutex_lock);
+	g_idata->flag &= ~LCD_ON;
+	mutex_unlock(&g_idata->mutex_lock);
+
+	cancel_work_sync(&g_idata->wq);
+	del_timer_sync(&(g_idata->ina321_timer));
+	return INA231_OK;
+}
+
 static int ina231_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter = client->adapter;
@@ -286,20 +393,29 @@ static int ina231_probe(struct i2c_client *client, const struct i2c_device_id *i
 	/* communication check and reset device*/
 	ret = i2c_smbus_write_word_swapped(client, INA231_CONFIG, idata->config->config_reset);
 	if (ret < 0) {
-		dev_info(&client->dev, "%s reset failed\n", client->name);
+		INA231_ERR("Reset failed\n");
 		return -ENODEV;
 	}
 	mdelay(20);
 
-	/* goto sleep */
-	i2c_smbus_write_word_swapped(client, INA231_CONFIG, idata->config->config_sleep_in);
+	/* configuration */
+	ret = i2c_smbus_write_word_swapped(idata->client, INA231_CONFIG, idata->config->config_work);
+	if (ret < 0) {
+		INA231_ERR("Setting configuration failed\n");
+		return -ENODEV;
+	}
+	/* set calibrate*/
+	ret = i2c_smbus_write_word_swapped(idata->client, INA231_CALIBRATION, idata->config->calibrate_content);
+	if (ret < 0) {
+		INA231_ERR("Setting calibrate failed\n");
+		return -ENODEV;
+	}
 
 	i2c_set_clientdata(client, idata);
-
 	idata->dev = device_create(ina231_class, NULL, 0, NULL, "%s", client->name);
 	if (IS_ERR(idata->dev)) {
 		/* Not fatal */
-		printk(KERN_WARNING "Unable to create device; errno = %ld\n", PTR_ERR(idata->dev));
+		INA231_ERR("Unable to create device; errno = %ld\n", PTR_ERR(idata->dev));
 		idata->dev = NULL;
 	} else {
 		dev_set_drvdata(idata->dev, idata);
@@ -308,6 +424,16 @@ static int ina231_probe(struct i2c_client *client, const struct i2c_device_id *i
 			return ret;
 	}
 
+	INIT_WORK(&(idata->wq), ina231_monitor_wq_handler);
+	init_timer(&(idata->ina321_timer));
+	idata->ina321_timer.function = ina231_monitor_timer_func;
+	idata->ina321_timer.data = (unsigned long)idata;
+	idata->ina321_timer.expires = jiffies + INA231_SAMPLE_TIME * HZ;
+	add_timer(&(idata->ina321_timer));
+	idata->num = 1;
+	idata->flag |= LCD_ON;
+	mutex_init(&idata->mutex_lock);
+	g_idata = idata;
 	dev_info(&client->dev, "name:%s(address:0x%x) probe successfully\n", client->name, client->addr);
 	return 0;
 }
@@ -357,13 +483,13 @@ static int __init ina231_module_init(void)
 
 	ina231_class = class_create(THIS_MODULE, "ina231");
 	if (IS_ERR(ina231_class)) {
-		printk(KERN_WARNING "Unable to create ina231 class; errno = %ld\n", PTR_ERR(ina231_class));
+		INA231_ERR("Unable to create ina231 class; errno = %ld\n", PTR_ERR(ina231_class));
 		ina231_class = NULL;
 	}
 
 	ret = i2c_add_driver(&ina231_driver);
 	if (ret)
-		pr_err("Unable to register ina231 driver\n");
+		INA231_ERR("Unable to register ina231 driver\n");
 
 	return ret;
 }

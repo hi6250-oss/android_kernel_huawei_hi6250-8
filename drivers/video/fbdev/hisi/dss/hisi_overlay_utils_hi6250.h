@@ -47,7 +47,7 @@
 /* 1008 * 144bits */
 #define DFS_TIME	(80)
 #define DBUF0_DEPTH	(1008)
-
+#define MAX_DEPTH	(2016)
 /* scl */
 #define SCF_LINE_BUF	(1200)
 

@@ -87,6 +87,7 @@ int hisi_pwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level)
 	if ((bl_level < pinfo->bl_min) && bl_level) {
 		bl_level = pinfo->bl_min;
 	}
+	bl_flicker_detector_collect_device_bl(bl_level);
 
 	bl_level = (bl_level * PWM_OUT_PRECISION) / pinfo->bl_max;
 
@@ -220,7 +221,7 @@ static int hisi_pwm_probe(struct platform_device *pdev)
 
 	np = of_find_compatible_node(NULL, NULL, DTS_COMP_PWM_NAME);
 	if (!np) {
-		HISI_FB_ERR("NOT FOUND device node %s!\n", DTS_COMP_PWM_NAME);
+		dev_err(&pdev->dev, "NOT FOUND device node %s!\n", DTS_COMP_PWM_NAME);
 		ret = -ENXIO;
 		goto err_return;
 	}
@@ -228,13 +229,13 @@ static int hisi_pwm_probe(struct platform_device *pdev)
 	/* get pwm reg base */
 	hisifd_pwm_base = of_iomap(np, 0);
 	if (!hisifd_pwm_base) {
-		HISI_FB_ERR("failed to get pwm_base resource.\n");
+		dev_err(&pdev->dev, "failed to get pwm_base resource.\n");
 		return -ENXIO;
 	}
 
 	ret = of_property_read_u32(np, "fpga_flag", &g_pwm_fpga_flag);
 	if (ret) {
-		HISI_FB_ERR("failed to get fpga_flag resource.\n");
+		dev_err(&pdev->dev, "failed to get fpga_flag resource.\n");
 		return -ENXIO;
 	}
 
@@ -243,19 +244,18 @@ static int hisi_pwm_probe(struct platform_device *pdev)
 		ret = pinctrl_cmds_tx(pdev, pwm_pinctrl_init_cmds,
 			ARRAY_SIZE(pwm_pinctrl_init_cmds));
 		if (ret != 0) {
-			HISI_FB_ERR("Init pwm pinctrl failed! ret=%d.\n", ret);
+			dev_err(&pdev->dev, "Init pwm pinctrl failed! ret=%d.\n", ret);
 			goto err_return;
 		}
 
 		/* get pwm clk resource */
 		g_pwm_clk = of_clk_get(np, 0);
 		if (IS_ERR(g_pwm_clk)) {
-			HISI_FB_ERR("%s clock not found: %d!\n",
+			dev_err(&pdev->dev, "%s clock not found: %d!\n",
 				np->name, (int)PTR_ERR(g_pwm_clk));
 			ret = -ENXIO;
 			goto err_return;
 		}
-
 
 		HISI_FB_INFO("dss_pwm_clk:[%lu]->[%lu].\n",
 			DEFAULT_PWM_CLK_RATE, clk_get_rate(g_pwm_clk));
@@ -275,6 +275,11 @@ static int hisi_pwm_remove(struct platform_device *pdev)
 {
 	struct clk *clk_tmp = NULL;
 	int ret = 0;
+
+	if (NULL == pdev) {
+		HISI_FB_ERR("pdev is NULL");
+		return -EINVAL;
+	}
 
 	ret = pinctrl_cmds_tx(pdev, pwm_pinctrl_finit_cmds,
 		ARRAY_SIZE(pwm_pinctrl_finit_cmds));

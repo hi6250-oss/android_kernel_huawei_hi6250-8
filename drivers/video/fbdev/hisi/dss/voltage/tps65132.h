@@ -40,6 +40,34 @@
 #define TPS65132_DISN_BIT   (1<<0)
 #define TPS65132_WED_BIT    (1<<7)   //write enable bit
 
+struct tps65132_voltage {
+	u32 voltage;
+	int value;
+};
+
+static struct tps65132_voltage vol_table[] = {
+	{4000000,TPS65132_VOL_40},
+	{4100000,TPS65132_VOL_41},
+	{4200000,TPS65132_VOL_42},
+	{4300000,TPS65132_VOL_43},
+	{4400000,TPS65132_VOL_44},
+	{4500000,TPS65132_VOL_45},
+	{4600000,TPS65132_VOL_46},
+	{4700000,TPS65132_VOL_47},
+	{4800000,TPS65132_VOL_48},
+	{4900000,TPS65132_VOL_49},
+	{5000000,TPS65132_VOL_50},
+	{5100000,TPS65132_VOL_51},
+	{5200000,TPS65132_VOL_52},
+	{5300000,TPS65132_VOL_53},
+	{5400000,TPS65132_VOL_54},
+	{5500000,TPS65132_VOL_55},
+	{5600000,TPS65132_VOL_56},
+	{5700000,TPS65132_VOL_57},
+	{5800000,TPS65132_VOL_58},
+	{5900000,TPS65132_VOL_59},
+	{6000000,TPS65132_VOL_60},
+};
 
 struct tps65132_device_info {
     struct device  *dev;
@@ -63,6 +91,10 @@ struct tps65132_configure_info {
 extern int is_normal_lcd(void);
 extern int get_vsp_voltage(void);
 extern int get_vsn_voltage(void);
+#endif
+
+#ifdef CONFIG_LCD_KIT_DRIVER
+int tps65132_dbg_set_bias_for_hisi(int vpos, int vneg);
 #endif
 
 #endif

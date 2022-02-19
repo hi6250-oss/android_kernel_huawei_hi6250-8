@@ -14,7 +14,7 @@
 #include "hisi_overlay_utils.h"
 #include "hisi_block_algorithm.h"
 #include "hisi_overlay_cmdlist_utils.h"
-
+/*lint -e570 -e648 -e666 -e838 -e574*/
 static int hisi_check_two_wch_wb_finish(struct hisi_fb_data_type *hisifd, uint32_t last_cmdlist_idxs,
 	int last_mctl_idx, uint32_t cmdlist_idxs, int mctl_idx)
 {
@@ -279,6 +279,7 @@ static void hisi_offline_clear(struct hisi_fb_data_type *hisifd,
 	}
 
 	hisi_drm_layer_offline_clear(hisifd, pov_req);
+	hisifb_buf_sync_signal(hisifd);
 
 	pov_h_block_infos = (dss_overlay_block_t *)pov_req->ov_block_infos_ptr;
 	if (pov_h_block_infos == NULL) {
@@ -351,7 +352,6 @@ static int hisi_get_ov_data_from_user(struct hisi_fb_data_type *hisifd,
 	}
 
 	pov_req->release_fence = -1;
-
 	if ((pov_req->ov_block_nums <= 0) ||
 		(pov_req->ov_block_nums > HISI_DSS_OV_BLOCK_NUMS)) {
 		HISI_FB_ERR("fb%d, ov_block_nums(%d) is out of range!\n",
@@ -428,21 +428,6 @@ static bool hisi_check_csc_config_needed(dss_overlay_t *pov_req_h_v)
 
 	pov_h_v_block = (dss_overlay_block_t *)(pov_req_h_v->ov_block_infos_ptr);
 
-	if (g_dss_version_tag & FB_ACCEL_KIRIN970) {
-		// check whether csc config needed or not
-		if ((pov_h_v_block->layer_nums == 1) &&
-			(isYUV(pov_h_v_block->layer_infos[0].img.format))) {
-			if ((pov_req_h_v->wb_layer_nums == 1) &&
-				isYUV(pov_req_h_v->wb_layer_infos[0].dst.format)) {
-				if ((pov_h_v_block->layer_infos[0].dst_rect.w == pov_req_h_v->wb_layer_infos[0].dst_rect.w)
-					&& (pov_h_v_block->layer_infos[0].dst_rect.h == pov_req_h_v->wb_layer_infos[0].dst_rect.h)) {
-					return false;
-				}
-			}
-		}
-		return true;
-	}
-
 	// check whether csc config needed or not
 	if ((pov_h_v_block->layer_nums == 1) &&
 		(isYUV(pov_h_v_block->layer_infos[0].img.format))) {
@@ -498,12 +483,12 @@ static int hisi_vactive0_start_wait(struct hisi_fb_data_type *hisifd, dss_overla
 		hisifb_get_timestamp(&tv0);
 		if (is_mipi_cmd_panel(online_hisifd) && (online_hisifd->vactive0_start_flag == 0)) {
 		REDO_CMD:
-			ret = wait_event_interruptible_timeout(online_hisifd->vactive0_start_wq, online_hisifd->vactive0_start_flag, msecs_to_jiffies(timeout_interval));
+			ret = wait_event_interruptible_timeout(online_hisifd->vactive0_start_wq, online_hisifd->vactive0_start_flag, msecs_to_jiffies(timeout_interval)); //lint !e666
 		} else if (!is_mipi_cmd_panel(online_hisifd)) {
 			prev_vactive0_start = online_hisifd->vactive0_start_flag;
 		REDO_VIDEO:
 			ret = wait_event_interruptible_timeout(online_hisifd->vactive0_start_wq,(prev_vactive0_start != online_hisifd->vactive0_start_flag),
-												   msecs_to_jiffies(timeout_interval));
+												   msecs_to_jiffies(timeout_interval)); //lint !e666
 		}
 
 		if (ret == -ERESTARTSYS) {
@@ -550,8 +535,8 @@ static void hisi_tuning_offline_clk_rate(struct hisi_fb_data_type *hisifd)
 	}
 
 	if (hisifd->need_tuning_clk) {
-		offline_clk_rate = hisifd->dss_clk_rate.dss_pri_clk_rate;
-		online_clk_rate = hisifd_list[PRIMARY_PANEL_IDX]->dss_clk_rate.dss_pri_clk_rate;
+		offline_clk_rate = hisifd->dss_vote_cmd.dss_pri_clk_rate;
+		online_clk_rate = hisifd_list[PRIMARY_PANEL_IDX]->dss_vote_cmd.dss_pri_clk_rate;
 
 		if (offline_clk_rate >= online_clk_rate) {
 			clk_set_rate(hisifd->dss_pri_clk, offline_clk_rate);
@@ -577,11 +562,11 @@ static void hisi_recovery_online_clk_rate(struct hisi_fb_data_type *hisifd)
 	}
 
 	if (hisifd->need_tuning_clk) {
-		online_clk_rate = hisifd_list[PRIMARY_PANEL_IDX]->dss_clk_rate.dss_pri_clk_rate;
+		online_clk_rate = hisifd_list[PRIMARY_PANEL_IDX]->dss_vote_cmd.dss_pri_clk_rate;
 
 		clk_set_rate(hisifd->dss_pri_clk, online_clk_rate);
 
-		hisifd->dss_clk_rate.dss_pri_clk_rate = online_clk_rate;
+		hisifd->dss_vote_cmd.dss_pri_clk_rate = online_clk_rate;
 
 		hisifd->need_tuning_clk = false;
 
@@ -589,34 +574,225 @@ static void hisi_recovery_online_clk_rate(struct hisi_fb_data_type *hisifd)
 	}
 }
 
+static uint32_t hisi_get_timeout_interval(void)
+{
+	uint32_t timeout_interval = 0;
+
+	if (g_fpga_flag == 0) {
+		timeout_interval = DSS_COMPOSER_TIMEOUT_THRESHOLD_ASIC;
+	} else {
+		timeout_interval = DSS_COMPOSER_TIMEOUT_THRESHOLD_FPGA;
+	}
+	return timeout_interval;
+}
+
+static int hisi_get_mctl_idx(int32_t wb_type, int ovl_idx)
+{
+	int mctl_idx = 0;
+
+	if (WB_TYPE_WCH2 == wb_type) {
+		mctl_idx = DSS_MCTL5;
+	} else {
+		mctl_idx = ovl_idx;
+	}
+	return mctl_idx;
+}
+
+static bool hisi_get_parallel_compose_flag(struct hisi_fb_data_type *hisifd, uint32_t wb_compose_type)
+{
+	bool parallel_compose_flag = false;
+
+	if (NULL == hisifd) {
+		HISI_FB_ERR("NULL Pointer!\n");
+		return false;
+	}
+
+	if ((hisifd->wb_info.to_be_continued == DSS_LAYER_PARALLEL_COMPOSE) && (wb_compose_type == DSS_WB_COMPOSE_PRIMARY)) {
+		parallel_compose_flag = true;
+	}
+	return parallel_compose_flag;
+}
+
+static bool hisi_get_debug_flag(void)
+{
+	bool debug = false;
+
+	if (g_debug_ovl_offline_composer_hold || g_debug_ovl_block_composer) {
+		debug = true;
+	}
+	return debug;
+}
+
+static int hisi_ov_block_config(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov_req, dss_overlay_block_t *pov_h_block_infos, int32_t wb_type)
+{
+	dss_layer_t *layer = NULL;
+	dss_wb_layer_t *wb_layer = NULL;
+	dss_wb_layer_t *wb_layer4block = NULL;
+	dss_overlay_block_t *pov_h_block = NULL;
+	dss_overlay_t *pov_req_h_v = NULL;
+	dss_overlay_block_t *pov_h_v_block = NULL;
+	dss_rect_ltrb_t clip_rect;
+	dss_rect_t aligned_rect;
+	dss_rect_t wb_ov_block_rect;
+	int enable_cmdlist = 0;
+	int ret = 0;
+	int k = 0;
+	int i = 0;
+	int m = 0;
+	int n = 0;
+	int block_num = 0;
+	bool has_base = false;
+	bool csc_needed = true;
+	bool rdma_stretch_enable = false;
+	bool last_block = false;
+
+	if (NULL == hisifd) {
+		HISI_FB_ERR("NULL Pointer!\n");
+		return -EINVAL;
+	}
+
+	if (NULL == pov_req) {
+		HISI_FB_ERR("pov_req is NULL Pointer!\n");
+		return -EINVAL;
+	}
+
+	if (NULL == pov_h_block_infos) {
+		HISI_FB_ERR("pov_h_block_infos is NULL Pointer!\n");
+		return -EINVAL;
+	}
+
+	wb_layer4block = &(pov_req->wb_layer_infos[0]);
+
+	////////////////////////////////////////////////////////////////////////////
+	// get vertical block ov
+	pov_req_h_v = &(hisifd->ov_req);
+	pov_req_h_v->ov_block_infos_ptr = (uint64_t)(&(hisifd->ov_block_infos));
+
+	enable_cmdlist = g_enable_ovl_cmdlist_offline;
+
+	for (m = 0; m < pov_req->ov_block_nums; m++) {
+		pov_h_block = &(pov_h_block_infos[m]);
+		ret = get_ov_block_rect(pov_req, pov_h_block, wb_layer4block, &block_num, hisifd->ov_block_rects,false);//lint !e747
+		if ((ret != 0) || (block_num == 0) || (block_num >= HISI_DSS_CMDLIST_BLOCK_MAX)) {
+			HISI_FB_ERR("get_ov_block_rect failed! ret = %d, block_num[%d]\n", ret, block_num);
+			ret = -1;
+			return ret;
+		}
+
+		for (k = 0; k < block_num; k++) {
+			has_base = false;
+
+			ret = get_block_layers(pov_req, pov_h_block, *hisifd->ov_block_rects[k], pov_req_h_v);
+			if (ret != 0) {
+				HISI_FB_ERR("get_block_layers err ret = %d\n", ret);
+				return ret;
+			}
+
+			ret = rect_across_rect(*hisifd->ov_block_rects[k], wb_layer4block->src_rect, &wb_ov_block_rect);
+			if (ret == 0) {
+				HISI_FB_ERR("no cross! ov_block_rects[%d]{%d %d %d %d}, wb src_rect{%d %d %d %d}\n", k,
+					hisifd->ov_block_rects[k]->x, hisifd->ov_block_rects[k]->y,
+					hisifd->ov_block_rects[k]->w, hisifd->ov_block_rects[k]->h,
+					wb_layer4block->src_rect.x, wb_layer4block->src_rect.y,
+					wb_layer4block->src_rect.w, wb_layer4block->src_rect.h);
+				continue;
+			}
+
+			if (g_debug_ovl_offline_composer == 1) {
+				HISI_FB_INFO("fb%d, get ov_req_h_v from kernel.\n", hisifd->index);
+				dumpDssOverlay(hisifd, pov_req_h_v);
+			}
+
+			if (k == 0) {
+				ret = hisi_dss_module_init(hisifd);
+				if (ret != 0) {
+					HISI_FB_ERR("hisi_dss_module_init failed! ret = %d\n", ret);
+					return ret;
+				}
+			}
+
+			pov_h_v_block = (dss_overlay_block_t *)(pov_req_h_v->ov_block_infos_ptr);
+
+			// check whether csc config needed or not
+			csc_needed = hisi_check_csc_config_needed(pov_req_h_v);
+
+			hisi_dss_aif_handler(hisifd, pov_req_h_v, pov_h_v_block);
+
+			ret = hisi_dss_ovl_base_config(hisifd, pov_req_h_v, pov_h_v_block,
+				&wb_ov_block_rect, pov_req_h_v->ovl_idx, m);
+			if (ret != 0) {
+				HISI_FB_ERR("hisi_dss_ovl_init failed! ret = %d\n", ret);
+				return ret;
+			}
+
+			for (i = 0; i < pov_h_v_block->layer_nums; i++) {
+				layer = &(pov_h_v_block->layer_infos[i]);
+				memset(&clip_rect, 0, sizeof(dss_rect_ltrb_t));
+				memset(&aligned_rect, 0, sizeof(dss_rect_t));
+				rdma_stretch_enable = false;
+
+				ret = hisi_ov_compose_handler(hisifd, pov_req_h_v, pov_h_v_block, layer, &wb_layer4block->dst_rect,
+					&wb_ov_block_rect, &clip_rect, &aligned_rect, &rdma_stretch_enable, &has_base, csc_needed, enable_cmdlist);
+				if (ret != 0) {
+					HISI_FB_ERR("fb%d, hisi_ov_compose_handler failed! ret = %d\n", hisifd->index, ret);
+					return ret;
+				}
+			}
+
+			if (m == 0) {
+				for (n = 0; n < pov_req_h_v->wb_layer_nums; n++) {
+					wb_layer = &(pov_req_h_v->wb_layer_infos[n]);
+					if (k == (block_num -1)) {
+						last_block = true;
+					}
+
+					ret = hisi_wb_compose_handler(hisifd, pov_req_h_v, wb_layer,
+						&wb_ov_block_rect, last_block, wb_type, csc_needed, enable_cmdlist);
+					if (ret != 0) {
+						HISI_FB_ERR("hisi_dss_write_back_config failed, ret = %d\n", ret);
+						return ret;
+					}
+				}
+			}
+
+			ret = hisi_dss_mctl_ov_config(hisifd, pov_req, pov_req_h_v->ovl_idx, has_base, false);
+			if (ret != 0) {
+				HISI_FB_ERR("hisi_dss_mctl_config failed! ret = %d\n", ret);
+				return ret;
+			}
+
+			ret = hisi_dss_ov_module_set_regs(hisifd, pov_req, pov_req_h_v->ovl_idx, enable_cmdlist, 0, 0, false);
+			if (ret != 0) {
+				HISI_FB_ERR("hisi_dss_module_config failed! ret = %d\n", ret);
+				return ret;
+			}
+
+			if (k == g_debug_ovl_offline_block_num) {
+				break;
+			}
+
+			if (k < (block_num - 1)) {
+				ret = hisi_dss_module_init(hisifd);
+				if (ret != 0) {
+					HISI_FB_ERR("hisi_dss_module_init failed! ret = %d\n", ret);
+					return ret;
+				}
+			}
+		}
+	}
+	return ret;
+}
 
 int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 {
 	dss_overlay_t *pov_req = NULL;
-	dss_overlay_t *pov_req_h_v = NULL;
 	dss_overlay_block_t *pov_h_block_infos = NULL;
-	dss_overlay_block_t *pov_h_block = NULL;
-	dss_overlay_block_t *pov_h_v_block = NULL;
-	dss_layer_t *layer = NULL;
-	dss_wb_layer_t *wb_layer = NULL;
-	dss_wb_layer_t *wb_layer4block = NULL;
-	dss_rect_ltrb_t clip_rect;
-	dss_rect_t aligned_rect;
-	bool rdma_stretch_enable = false;
 	int use_comm_mmbuf = 0;
-	int i = 0;
-	int k = 0;
-	int n = 0;
-	int m = 0;
 	int ret = 0;
 	int ret_cmdlist_state = 0;
-	int block_num = 0;
 	int times = 0;
-	bool last_block = false;
-	dss_rect_t wb_ov_block_rect;
 	uint32_t cmdlist_idxs = 0;
 	int enable_cmdlist = 0;
-	bool has_base = false;
 	int mctl_idx = 0;
 	int32_t wb_type = 0;
 	uint32_t wb_compose_type = 0;
@@ -629,10 +805,10 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 	struct timeval tv5;
 	bool reset = false;
 	bool debug = false;
-	bool csc_needed = true;
 	struct list_head lock_list;
 	uint32_t timeout_interval = 0;
 	bool parallel_compose_flag = false;
+	static uint32_t s_dmd_offline_compose_timeout_count = 0;
 
 	if (NULL == hisifd) {
 		HISI_FB_ERR("NULL Pointer!\n");
@@ -646,11 +822,7 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 
 	INIT_LIST_HEAD(&lock_list);
 
-	if (g_fpga_flag == 0) {
-		timeout_interval = DSS_COMPOSER_TIMEOUT_THRESHOLD_ASIC;
-	} else {
-		timeout_interval = DSS_COMPOSER_TIMEOUT_THRESHOLD_FPGA;
-	}
+	timeout_interval = hisi_get_timeout_interval();
 
 	if (g_debug_ovl_offline_composer)
 		HISI_FB_INFO("+.\n");
@@ -687,10 +859,12 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 		dumpDssOverlay(hisifd, pov_req);
 	}
 
-	////////////////////////////////////////////////////////////////////////////
-	// get vertical block ov
-	pov_req_h_v = &(hisifd->ov_req);
-	pov_req_h_v->ov_block_infos_ptr = (uint64_t)(&(hisifd->ov_block_infos));
+	ret = hisifb_offline_layerbuf_lock(hisifd, pov_req, &lock_list);
+	if (ret != 0) {
+		HISI_FB_ERR("fb%d, hisifb_offline_layerbuf_lock failed! ret=%d\n", hisifd->index, ret);
+		goto err_return_sem0;
+	}
+	hisifb_layerbuf_flush(hisifd, &lock_list);
 
 	hisifd->mmbuf_info = hisi_dss_mmbuf_info_get(hisifd, 0);
 
@@ -712,7 +886,6 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 	}
 
 	wb_compose_type = pov_req->wb_compose_type;
-	wb_layer4block = &(pov_req->wb_layer_infos[0]);
 	wb_type = hisi_get_wb_type(pov_req);
 	if ((wb_type < WB_TYPE_WCH0) || (wb_type >= WB_TYPE_MAX)) {
 		HISI_FB_ERR("fb%d, hisi_get_wb_type failed!\n", hisifd->index);
@@ -720,15 +893,9 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 		goto err_return_sem0;
 	}
 
-	if (WB_TYPE_WCH2 == wb_type) {
-		mctl_idx = DSS_MCTL5;
-	} else {
-		mctl_idx = pov_req->ovl_idx;
-	}
+	mctl_idx = hisi_get_mctl_idx(wb_type, pov_req->ovl_idx);
 
-	if ((hisifd->wb_info.to_be_continued == DSS_LAYER_PARALLEL_COMPOSE) && (wb_compose_type == DSS_WB_COMPOSE_PRIMARY)) {
-		parallel_compose_flag = true;
-	}
+	parallel_compose_flag = hisi_get_parallel_compose_flag(hisifd, wb_compose_type);
 
 	pov_h_block_infos = (dss_overlay_block_t *)(pov_req->ov_block_infos_ptr);
 
@@ -740,116 +907,9 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 
 	hisi_drm_layer_offline_config(hisifd, pov_req);
 
-	for (m = 0; m < pov_req->ov_block_nums; m++) {
-		pov_h_block = &(pov_h_block_infos[m]);
-		ret = get_ov_block_rect(pov_req, pov_h_block, wb_layer4block, &block_num, hisifd->ov_block_rects,false);//lint !e747
-		if ((ret != 0) || (block_num == 0) || (block_num >= HISI_DSS_CMDLIST_BLOCK_MAX)) {
-			HISI_FB_ERR("get_ov_block_rect failed! ret = %d, block_num[%d]\n", ret, block_num);
-			ret = -1;
-			goto err_return_sem0;
-		}
-
-		for (k = 0; k < block_num; k++) {
-			has_base = false;
-
-			ret = get_block_layers(pov_req, pov_h_block, *hisifd->ov_block_rects[k], pov_req_h_v);
-			if (ret != 0) {
-				HISI_FB_ERR("get_block_layers err ret = %d\n", ret);
-				goto err_return_sem0;
-			}
-
-			ret = rect_across_rect(*hisifd->ov_block_rects[k], wb_layer4block->src_rect, &wb_ov_block_rect);
-			if (ret == 0) {
-				HISI_FB_ERR("no cross! ov_block_rects[%d]{%d %d %d %d}, wb src_rect{%d %d %d %d}\n", k,
-					hisifd->ov_block_rects[k]->x, hisifd->ov_block_rects[k]->y,
-					hisifd->ov_block_rects[k]->w, hisifd->ov_block_rects[k]->h,
-					wb_layer4block->src_rect.x, wb_layer4block->src_rect.y,
-					wb_layer4block->src_rect.w, wb_layer4block->src_rect.h);
-				continue;
-			}
-
-			if (g_debug_ovl_offline_composer == 1) {
-				HISI_FB_INFO("fb%d, get ov_req_h_v from kernel.\n", hisifd->index);
-				dumpDssOverlay(hisifd, pov_req_h_v);
-			}
-
-			if (k == 0) {
-				ret = hisi_dss_module_init(hisifd);
-				if (ret != 0) {
-					HISI_FB_ERR("hisi_dss_module_init failed! ret = %d\n", ret);
-					goto err_return_sem0;
-				}
-			}
-
-			pov_h_v_block = (dss_overlay_block_t *)(pov_req_h_v->ov_block_infos_ptr);
-
-			// check whether csc config needed or not
-			csc_needed = hisi_check_csc_config_needed(pov_req_h_v);
-
-			hisi_dss_aif_handler(hisifd, pov_req_h_v, pov_h_v_block);
-
-			ret = hisi_dss_ovl_base_config(hisifd, pov_req_h_v, pov_h_v_block,
-				&wb_ov_block_rect, pov_req_h_v->ovl_idx, m);
-			if (ret != 0) {
-				HISI_FB_ERR("hisi_dss_ovl_init failed! ret = %d\n", ret);
-				goto err_return_sem0;
-			}
-
-			for (i = 0; i < pov_h_v_block->layer_nums; i++) {
-				layer = &(pov_h_v_block->layer_infos[i]);
-				memset(&clip_rect, 0, sizeof(dss_rect_ltrb_t));
-				memset(&aligned_rect, 0, sizeof(dss_rect_ltrb_t));
-				rdma_stretch_enable = false;
-
-				ret = hisi_ov_compose_handler(hisifd, pov_req_h_v, pov_h_v_block, layer, &wb_layer4block->dst_rect,
-					&wb_ov_block_rect, &clip_rect, &aligned_rect, &rdma_stretch_enable, &has_base, csc_needed, enable_cmdlist);
-				if (ret != 0) {
-					HISI_FB_ERR("fb%d, hisi_ov_compose_handler failed! ret = %d\n", hisifd->index, ret);
-					goto err_return_sem0;
-				}
-			}
-
-			if (m == 0) {
-				for (n = 0; n < pov_req_h_v->wb_layer_nums; n++) {
-					wb_layer = &(pov_req_h_v->wb_layer_infos[n]);
-					if (k == (block_num -1)) {
-						last_block = true;
-					}
-
-					ret = hisi_wb_compose_handler(hisifd, pov_req_h_v, wb_layer,
-						&wb_ov_block_rect, last_block, wb_type, csc_needed, enable_cmdlist);
-					if (ret != 0) {
-						HISI_FB_ERR("hisi_dss_write_back_config failed, ret = %d\n", ret);
-						goto err_return_sem0;
-					}
-				}
-			}
-
-			ret = hisi_dss_mctl_ov_config(hisifd, pov_req, pov_req_h_v->ovl_idx, has_base, false);
-			if (ret != 0) {
-				HISI_FB_ERR("hisi_dss_mctl_config failed! ret = %d\n", ret);
-				goto err_return_sem0;
-			}
-
-			ret = hisi_dss_ov_module_set_regs(hisifd, pov_req, pov_req_h_v->ovl_idx, enable_cmdlist, 0, 0, false);
-			if (ret != 0) {
-				HISI_FB_ERR("hisi_dss_module_config failed! ret = %d\n", ret);
-				goto err_return_sem0;
-			}
-
-			if (k == g_debug_ovl_offline_block_num) {
-				break;
-			}
-
-			if (k < (block_num - 1)) {
-				ret = hisi_dss_module_init(hisifd);
-				if (ret != 0) {
-					HISI_FB_ERR("hisi_dss_module_init failed! ret = %d\n", ret);
-					goto err_return_sem0;
-				}
-			}
-		}
-	}
+	ret = hisi_ov_block_config(hisifd, pov_req, pov_h_block_infos, wb_type);
+	if (ret != 0)
+		goto err_return_sem0;
 
 	ret = hisi_add_clear_module_reg_node(hisifd, pov_req, cmdlist_idxs, enable_cmdlist, &use_comm_mmbuf);
 	if (ret != 0) {
@@ -863,7 +923,7 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 		hisi_cmdlist_flush_cache(hisifd, cmdlist_idxs);
 	}
 
-	hisifb_buf_sync_handle_offline(hisifd, pov_req);
+	hisifb_buf_sync_handle(hisifd, pov_req);
 
 	up(&(hisifd->cmdlist_info->cmdlist_wb_common_sem));
 
@@ -918,7 +978,7 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 	REDO:
 		ret = wait_event_interruptible_timeout(hisifd->cmdlist_info->cmdlist_wb_wq[wb_type],
 			(hisifd->cmdlist_info->cmdlist_wb_done[wb_type] == 1),
-			msecs_to_jiffies(timeout_interval));
+			msecs_to_jiffies(timeout_interval)); //lint !e666
 
 		if (ret == -ERESTARTSYS) {
 			if (times < 50) {
@@ -938,12 +998,23 @@ int hisi_ov_offline_play(struct hisi_fb_data_type *hisifd, void __user *argp)
 				"ret=%d, ret_rch_state=%d, diff =%d usecs!\n",
 				use_comm_mmbuf, wb_compose_type, inp32(hisifd->dss_base + GLB_CPU_OFF_INTS), ret, ret_cmdlist_state,
 				hisifb_timestamp_diff(&tv4, &tv5));
+			s_dmd_offline_compose_timeout_count++;
+			if (s_dmd_offline_compose_timeout_count >= OFFLINE_COMPOSE_TIMEOUT_EXPECT_COUNT) {
+				if (lcd_dclient && !dsm_client_ocuppy(lcd_dclient)) {
+					dsm_client_record(lcd_dclient, "compose timeout, use_comm_mmbuf = %d, wb_compose_type = %d, GLB_CPU_OFF_INTS = 0x%x,"
+						"ret = %d, ret_rch_state = %d, diff = %d usecs!\n",
+						use_comm_mmbuf, wb_compose_type, inp32(hisifd->dss_base + GLB_CPU_OFF_INTS), ret, ret_cmdlist_state,
+						hisifb_timestamp_diff(&tv4, &tv5));
+					dsm_client_notify(lcd_dclient, DSM_LCD_OFFLINE_COMPOSE_TIMEOUT_NO);
+				}
+				s_dmd_offline_compose_timeout_count = 0;
+			}
 			ret = -ETIMEDOUT;
 			reset = true;
 
-			if (g_debug_ovl_offline_composer_hold || g_debug_ovl_block_composer)
-				debug = true;
+			debug = hisi_get_debug_flag();
 		} else {
+			s_dmd_offline_compose_timeout_count = 0;
 			ret = 0;
 		}
 	}
@@ -976,10 +1047,7 @@ err_return_sem1:
 	return ret;
 
 err_return_sem0:
-	if (g_debug_ovl_offline_composer_hold || g_debug_ovl_block_composer) {
-		debug = true;
-	}
-
+	debug = hisi_get_debug_flag();
 	reset = true;
 	if (pov_req) {
 		hisi_offline_clear(hisifd, pov_req, enable_cmdlist, cmdlist_idxs, reset, debug);
@@ -1021,3 +1089,4 @@ return_parallel_compose:
 
 	return ret;
 }
+/*lint +e570 +e648 +e666 +e838 +e574*/

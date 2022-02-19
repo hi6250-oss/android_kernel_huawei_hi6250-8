@@ -15,8 +15,10 @@
 #include "lcdkit_panel.h"
 extern struct lcdkit_esd_error_info g_esd_error_info;
 
+/*lint -e574*/
 #define HISI_ESD_RECOVER_MAX_COUNT   (10)
 #define HISI_ESD_CHECK_MAX_COUNT     (3)
+#define HISI_ESD_POWER_OFF_TIME      100
 
 extern unsigned int g_esd_recover_disable;
 
@@ -24,7 +26,7 @@ static void hisifb_frame_refresh_for_esd(struct hisi_fb_data_type *hisifd)
 {
 	char *envp[2];
 	char buf[64];
-	snprintf(buf, sizeof(buf), "ESD_HAPPENDED=1");
+	snprintf(buf, sizeof(buf), "Refresh=1");
 	envp[0] = buf;
 	envp[1] = NULL;
 	kobject_uevent_env(&(hisifd->fbi->dev->kobj), KOBJ_CHANGE, envp);
@@ -49,11 +51,12 @@ static void hisifb_esd_recover(struct hisi_fb_data_type *hisifd)
 
 	down(&hisifd->brightness_esd_sem);
 	bl_level_cur = hisifd->bl_level;
-	hisifb_set_backlight(hisifd, 0);
+	hisifb_set_backlight(hisifd, 0, false);
 	up(&hisifd->brightness_esd_sem);
 
 	/*lcd panel off*/
 	ret = hisi_fb_blank_sub(FB_BLANK_POWERDOWN, hisifd->fbi);
+	msleep(HISI_ESD_POWER_OFF_TIME);
 	if (ret != 0) {
 		HISI_FB_ERR("fb%d, blank_mode(%d) failed!\n", hisifd->index, FB_BLANK_POWERDOWN);
 	}
@@ -66,9 +69,30 @@ static void hisifb_esd_recover(struct hisi_fb_data_type *hisifd)
 	/*backlight on*/
 	msleep(100);
 	down(&hisifd->brightness_esd_sem);
-	hisifb_set_backlight(hisifd, bl_level_cur? bl_level_cur:hisifd->bl_level);
+	hisifb_set_backlight(hisifd, bl_level_cur? bl_level_cur:hisifd->bl_level, false);
 	up(&hisifd->brightness_esd_sem);
 	return ;
+}
+
+static void dsm_client_record_esd_err(uint32_t err_no)
+{
+	int i=0;
+
+	if (lcd_dclient && !dsm_client_ocuppy(lcd_dclient)) {
+		dsm_client_record(lcd_dclient, "lcd esd register status error:");
+		for (i = 0; i < g_esd_error_info.esd_error_reg_num; i++)
+		{
+			dsm_client_record(lcd_dclient, "read_reg_val[%d]=0x%x, expect_reg_val[%d]=0x%x",
+				g_esd_error_info.esd_reg_index[i],
+				g_esd_error_info.esd_error_reg_val[i],
+				g_esd_error_info.esd_reg_index[i],
+				g_esd_error_info.esd_expect_reg_val[i]);
+		}
+		dsm_client_record(lcd_dclient, "\n");
+		dsm_client_notify(lcd_dclient, err_no);
+	}
+
+	return;
 }
 
 static void hisifb_esd_check_wq_handler(struct work_struct *work)
@@ -78,7 +102,6 @@ static void hisifb_esd_check_wq_handler(struct work_struct *work)
 	int ret = 0;
 	int recover_count = 0;
 	int esd_check_count = 0;
-	int i=0;
 
 	esd_ctrl = container_of(work, struct hisifb_esd, esd_check_work);
 	if (NULL == esd_ctrl) {
@@ -98,8 +121,7 @@ static void hisifb_esd_check_wq_handler(struct work_struct *work)
 		}
 		return ;
 	}
-
-	while (recover_count < HISI_ESD_RECOVER_MAX_COUNT) {
+	while (recover_count < hisifd->panel_info.esd_recovery_max_count) {
 		if (esd_check_count < HISI_ESD_CHECK_MAX_COUNT) {
 			if (DSS_SEC_RUNNING == hisifd->secure_ctrl.secure_status)
 				break;
@@ -121,19 +143,7 @@ static void hisifb_esd_check_wq_handler(struct work_struct *work)
 
 		if ((esd_check_count >= HISI_ESD_CHECK_MAX_COUNT) || (ESD_RECOVER_STATE_START == hisifd->esd_recover_state)) {
 			HISI_FB_ERR("esd recover panel, recover_count:%d!\n",recover_count);
-			if (lcd_dclient && !dsm_client_ocuppy(lcd_dclient)) {
-				dsm_client_record(lcd_dclient, "lcd esd register status error:");
-				for (i = 0; i < g_esd_error_info.esd_error_reg_num; i++)
-				{
-					dsm_client_record(lcd_dclient, "read_reg_val[%d]=0x%x, expect_reg_val[%d]=0x%x",
-						g_esd_error_info.esd_reg_index[i],
-						g_esd_error_info.esd_error_reg_val[i],
-						g_esd_error_info.esd_reg_index[i],
-						g_esd_error_info.esd_expect_reg_val[i]);
-				}
-				dsm_client_record(lcd_dclient, "\n");
-				dsm_client_notify(lcd_dclient, DSM_LCD_ESD_STATUS_ERROR_NO);
-			}
+			dsm_client_record_esd_err(DSM_LCD_ESD_STATUS_ERROR_NO);
 			hisifb_esd_recover(hisifd);
 			hisifd->esd_recover_state = ESD_RECOVER_STATE_COMPLETE;
 			esd_check_count = 0;
@@ -142,10 +152,11 @@ static void hisifb_esd_check_wq_handler(struct work_struct *work)
 	}
 
 	// recover count equate 5, we disable esd check function
-	if (recover_count >= HISI_ESD_RECOVER_MAX_COUNT) {
+	if (recover_count >= hisifd->panel_info.esd_recovery_max_count) {
+		dsm_client_record_esd_err(DSM_LCD_POWER_ABNOMAL_ERROR_NO);
 		hrtimer_cancel(&esd_ctrl->esd_hrtimer);
 		hisifd->panel_info.esd_enable = 0;
-		HISI_FB_ERR("esd recover %d count, disable esd function\n", HISI_ESD_RECOVER_MAX_COUNT);
+		HISI_FB_ERR("esd recover %d count, disable esd function\n", hisifd->panel_info.esd_recovery_max_count);
 	}
 }
 
@@ -236,12 +247,12 @@ void hisifb_esd_register(struct platform_device *pdev)
 	}
 	hisifd = platform_get_drvdata(pdev);
 	if (NULL == hisifd) {
-		HISI_FB_ERR("hisifd is NULL");
+		dev_err(&pdev->dev, "hisifd is NULL");
 		return;
 	}
 	esd_ctrl = &(hisifd->esd_ctrl);
 	if (NULL == esd_ctrl) {
-		HISI_FB_ERR("esd_ctrl is NULL");
+		dev_err(&pdev->dev, "esd_ctrl is NULL");
 		return;
 	}
 
@@ -256,7 +267,7 @@ void hisifb_esd_register(struct platform_device *pdev)
 
 		esd_ctrl->esd_check_wq = create_singlethread_workqueue("esd_check");
 		if (!esd_ctrl->esd_check_wq) {
-			HISI_FB_ERR("create esd_check_wq failed\n");
+			dev_err(&pdev->dev, "create esd_check_wq failed\n");
 		}
 
 		INIT_WORK(&esd_ctrl->esd_check_work, hisifb_esd_check_wq_handler);
@@ -282,12 +293,12 @@ void hisifb_esd_unregister(struct platform_device *pdev)
 	}
 	hisifd = platform_get_drvdata(pdev);
 	if (NULL == hisifd) {
-		HISI_FB_ERR("hisifd is NULL");
+		dev_err(&pdev->dev, "hisifd is NULL");
 		return;
 	}
 	esd_ctrl = &(hisifd->esd_ctrl);
 	if (NULL == esd_ctrl) {
-		HISI_FB_ERR("esd_ctrl is NULL");
+		dev_err(&pdev->dev, "esd_ctrl is NULL");
 		return;
 	}
 
@@ -300,3 +311,4 @@ void hisifb_esd_unregister(struct platform_device *pdev)
 
 	esd_ctrl->esd_inited = 0;
 }
+/*lint +e574*/

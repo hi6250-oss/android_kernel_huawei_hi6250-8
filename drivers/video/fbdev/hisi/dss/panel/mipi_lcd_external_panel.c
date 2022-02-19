@@ -1578,9 +1578,15 @@ static int mipi_jdi_panel_set_fastboot(struct platform_device *pdev)
 {
 	struct hisi_fb_data_type *hisifd = NULL;
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
@@ -1616,9 +1622,15 @@ static int mipi_jdi_panel_on(struct platform_device *pdev)
 	uint32_t try_times = 0;
 #endif
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_INFO("fb%d, +!\n", hisifd->index);
 
@@ -1702,9 +1714,15 @@ static int mipi_jdi_panel_off(struct platform_device *pdev)
 {
 	struct hisi_fb_data_type *hisifd = NULL;
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_INFO("fb%d, +!\n", hisifd->index);
 
@@ -1749,7 +1767,10 @@ static int mipi_jdi_panel_remove(struct platform_device *pdev)
 {
 	struct hisi_fb_data_type *hisifd = NULL;
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
 
 	if (!hisifd) {
@@ -1784,9 +1805,15 @@ static int mipi_jdi_panel_set_backlight(struct platform_device *pdev, uint32_t b
 			sizeof(payload), payload},
 	};
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
@@ -1819,9 +1846,15 @@ static ssize_t mipi_jdi_panel_lcd_model_show(struct platform_device *pdev,
 	struct hisi_fb_data_type *hisifd = NULL;
 	ssize_t ret = 0;
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
@@ -1838,9 +1871,15 @@ static ssize_t mipi_jdi_panel_lcd_cabc_mode_show(struct platform_device *pdev,
 	struct hisi_fb_data_type *hisifd = NULL;
 	ssize_t ret = 0;
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
@@ -1855,9 +1894,15 @@ static ssize_t mipi_jdi_panel_lcd_cabc_mode_store(struct platform_device *pdev,
 	struct hisi_fb_data_type *hisifd = NULL;
 	ssize_t ret = 0;
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
@@ -1901,9 +1946,15 @@ static ssize_t mipi_jdi_panel_lcd_check_reg_show(struct platform_device *pdev, c
 		.cnt = ARRAY_SIZE(lcd_check_reg),
 	};
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	mipi_dsi1_base = hisifd->mipi_dsi1_base;
 
@@ -1947,9 +1998,15 @@ static ssize_t mipi_jdi_panel_lcd_mipi_detect_show(struct platform_device *pdev,
 		.cnt = ARRAY_SIZE(lcd_check_reg),
 	};
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	mipi_dsi1_base = hisifd->mipi_dsi1_base;
 
@@ -1985,9 +2042,15 @@ static ssize_t mipi_jdi_panel_lcd_gram_check_show(struct platform_device *pdev, 
 			sizeof(lcd_reg_aa), lcd_reg_aa},
 	};
 
-	BUG_ON(pdev == NULL);
+	if (pdev == NULL){
+		HISI_FB_ERR("pdev is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	mipi_dsi1_base = hisifd->mipi_dsi1_base;
 
@@ -2030,9 +2093,15 @@ static int mipi_jdi_panel_set_display_region(struct platform_device *pdev,
 	struct hisi_fb_data_type *hisifd = NULL;
 	struct hisi_panel_info *pinfo = NULL;
 
-	BUG_ON(pdev == NULL || dirty == NULL);
+	if (pdev == NULL || dirty == NULL){
+		HISI_FB_ERR("pdev or dirty is null\n");
+		return -1;
+	}
 	hisifd = platform_get_drvdata(pdev);
-	BUG_ON(hisifd == NULL);
+	if (hisifd == NULL){
+		HISI_FB_ERR("hisifd is null\n");
+		return -1;
+	}
 
 	pinfo = &(hisifd->panel_info);
 
@@ -2043,7 +2112,7 @@ static int mipi_jdi_panel_set_display_region(struct platform_device *pdev,
 		HISI_FB_ERR("dirty_region(%d,%d, %d,%d) not support!\n",
 			dirty->x, dirty->y, dirty->w, dirty->h);
 
-		BUG_ON(1);
+		return -1;//BUG_ON(1);
 	}
 
 	if (hisifd->panel_info.ifbc_type != IFBC_TYPE_NONE)

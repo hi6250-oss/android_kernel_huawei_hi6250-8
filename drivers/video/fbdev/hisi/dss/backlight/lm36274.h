@@ -19,7 +19,6 @@
 
 #define MAX_RATE_NUM 9
 /* base reg */
-#define REG_REVISION 0x01
 #define REG_BL_CONFIG_1 0x02
 #define REG_BL_CONFIG_2 0x03
 #define REG_BL_BRIGHTNESS_LSB 0x04
@@ -38,7 +37,6 @@
 #define REG_BL_OPTION_2 0x11
 #define REG_PWM_TO_DIGITAL_LSB 0x12
 #define REG_PWM_TO_DIGITAL_MSB 0x13
-#define REG_MAX 0x14
 #define REG_HIDDEN_ADDR 0x6A
 #define REG_SET_SECURITYBIT_ADDR 0x50
 #define REG_SET_SECURITYBIT_VAL  0x08
@@ -54,15 +52,13 @@
 #define DEVICE_RESET 0x1
 
 #define BL_MIN 0
-#define BL_MAX 2047
+
 #define MSB 3
 #define LSB 0x07
 
 #ifndef BIT
 #define BIT(x)  (1<<(x))
 #endif
-
-#define LOG_LEVEL_INFO 8
 
 #define LM36274_EMERG(msg, ...)    \
 	do { if (lm36274_msg_level > 0)  \
@@ -142,97 +138,10 @@ struct lm36274_chip_data {
 
 #define LM36274_RW_REG_MAX 13
 
-static struct backlight_information {
-    /* whether support lm36274 or not */
-    int lm36274_support;
-    /* which i2c bus controller lm36274 mount */
-    int lm36274_i2c_bus_id;
-    /* lm36274 hw_en gpio */
-    int lm36274_hw_en_gpio;
-    int lm36274_reg[LM36274_RW_REG_MAX];
-};
-
-static struct backlight_information bl_info;
-
-static char *lm36274_dts_string[LM36274_RW_REG_MAX] = {
-    "lm36274_bl_config_1",
-    "lm36274_bl_config_2",
-    "lm36274_auto_freq_low",
-    "lm36274_auto_freq_high",
-    "lm36274_display_bias_config_1",
-    "lm36274_display_bias_config_2",
-    "lm36274_display_bias_config_3",
-    "lm36274_lcm_boost_bias",
-    "lm36274_vpos_bias",
-    "lm36274_vneg_bias",
-    "lm36274_bl_option_1",
-    "lm36274_bl_option_2",
-    "lm36274_bl_en",
-};
-
-static unsigned int lm36274_reg_addr[LM36274_RW_REG_MAX] = {
-    REG_BL_CONFIG_1,
-    REG_BL_CONFIG_2,
-    REG_AUTO_FREQ_LOW,
-    REG_AUTO_FREQ_HIGH,
-    REG_DISPLAY_BIAS_CONFIG_1,
-    REG_DISPLAY_BIAS_CONFIG_2,
-    REG_DISPLAY_BIAS_CONFIG_3,
-    REG_LCM_BOOST_BIAS,
-    REG_VPOS_BIAS,
-    REG_VNEG_BIAS,
-    REG_BL_OPTION_1,
-    REG_BL_OPTION_2,
-    REG_BL_ENABLE,
-};
-
 struct lm36274_vsp_vsn_voltage {
     u32 voltage;
     int value;
 };
-
-static struct lm36274_vsp_vsn_voltage lm36274_voltage_table[] = {
-    {4000000,LM36274_VOL_400},
-    {4050000,LM36274_VOL_405},
-    {4100000,LM36274_VOL_410},
-    {4150000,LM36274_VOL_415},
-    {4200000,LM36274_VOL_420},
-    {4250000,LM36274_VOL_425},
-    {4300000,LM36274_VOL_430},
-    {4350000,LM36274_VOL_435},
-    {4400000,LM36274_VOL_440},
-    {4450000,LM36274_VOL_445},
-    {4500000,LM36274_VOL_450},
-    {4550000,LM36274_VOL_455},
-    {4600000,LM36274_VOL_460},
-    {4650000,LM36274_VOL_465},
-    {4700000,LM36274_VOL_470},
-    {4750000,LM36274_VOL_475},
-    {4800000,LM36274_VOL_480},
-    {4850000,LM36274_VOL_485},
-    {4900000,LM36274_VOL_490},
-    {4950000,LM36274_VOL_495},
-    {5000000,LM36274_VOL_500},
-    {5050000,LM36274_VOL_505},
-    {5100000,LM36274_VOL_510},
-    {5150000,LM36274_VOL_515},
-    {5200000,LM36274_VOL_520},
-    {5250000,LM36274_VOL_525},
-    {5600000,LM36274_VOL_560},
-    {5650000,LM36274_VOL_565},
-    {5700000,LM36274_VOL_570},
-    {5750000,LM36274_VOL_575},
-    {5800000,LM36274_VOL_580},
-    {5850000,LM36274_VOL_585},
-    {5900000,LM36274_VOL_590},
-    {5950000,LM36274_VOL_595},
-    {6000000,LM36274_VOL_600},
-    {6050000,LM36274_VOL_605},
-    {6400000,LM36274_VOL_640},
-    {6450000,LM36274_VOL_645},
-    {6500000,LM36274_VOL_650},
-};
-
 
 enum bl_enable{
     EN_2_SINK = 0x15,
@@ -311,9 +220,7 @@ struct backlight_work_mode_reg_info
     struct bl_config_reg bl_enable_config_reg;
 };
 
-static struct backlight_work_mode_reg_info g_bl_work_mode_reg_indo;
-
-ssize_t lm36274_set_backlight_reg(uint32_t bl_level);
+int lm36274_set_backlight_reg(unsigned int bl_level);
 ssize_t lm36274_set_reg(u8 bl_reg,u8 bl_mask,u8 bl_val);
 
 #endif /* __LINUX_LM36274_H */

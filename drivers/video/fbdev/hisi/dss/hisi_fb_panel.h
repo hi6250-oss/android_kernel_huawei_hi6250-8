@@ -104,6 +104,7 @@
 #define LCD_BL_IC_NAME_MAX	(50)
 
 #define DEV_DSS_VOLTAGE_ID (20)
+#define DEV_LDI1_VOLTAGE_ID (23)
 
 enum MIPI_LP11_MODE {
 	MIPI_NORMAL_LP11 = 0,
@@ -223,6 +224,18 @@ enum PXL0_DIV4_GT_EN {
 	PXL0_DIV4_GT_EN_OPEN,
 };
 
+/* used for 8bit 10bit switch */
+enum PANEL_MODE {
+	MODE_8BIT = 0,
+	MODE_10BIT_VIDEO_3X,
+};
+
+enum PARA_UPDT_STATE {
+	PARA_UPDT_END = 0,
+	PARA_UPDT_DOING,
+	PARA_UPDT_NEED,
+};
+
 /* pxl0_dsi_gt_en */
 enum PXL0_DSI_GT_EN {
 	PXL0_DSI_GT_EN_0 = 0,
@@ -239,19 +252,14 @@ enum VSYNC_CTRL_TYPE {
 	VSYNC_CTRL_VCC_OFF = BIT(3),
 };
 
-enum PERI_VOLTAGE_VALUE {
-	PERI_VOLTAGE_07V = 0x0,
-	PERI_VOLTAGE_08V = 0x2,
-	PERI_VOLTAGE_065V = 0x0,
-	PERI_VOLTAGE_075V = 0x2,
-	PERI_VOLTAGE_080V = 0x3,
-};
-
 #define MIPI_DSI_BIT_CLK_STR1	"00001"
 #define MIPI_DSI_BIT_CLK_STR2	"00010"
 #define MIPI_DSI_BIT_CLK_STR3	"00100"
 #define MIPI_DSI_BIT_CLK_STR4	"01000"
 #define MIPI_DSI_BIT_CLK_STR5	"10000"
+
+#define PANEL_10BIT_VIDEO_MODE_STR	"10bitvid"
+#define PANEL_8BIT_CMD_MODE_STR	"08bitcmd"
 
 /* resource desc */
 struct resource_desc {
@@ -363,6 +371,22 @@ struct ldi_panel_info {
 	uint32_t v_front_porch;
 	uint32_t v_pulse_width;
 
+	uint32_t hbp_store_vid;
+	uint32_t hfp_store_vid;
+	uint32_t hpw_store_vid;
+	uint32_t vbp_store_vid;
+	uint32_t vfp_store_vid;
+	uint32_t vpw_store_vid;
+	uint64_t pxl_clk_store_vid;
+
+	uint32_t hbp_store_cmd;
+	uint32_t hfp_store_cmd;
+	uint32_t hpw_store_cmd;
+	uint32_t vbp_store_cmd;
+	uint32_t vfp_store_cmd;
+	uint32_t vpw_store_cmd;
+	uint64_t pxl_clk_store_cmd;
+
 	uint8_t hsync_plr;
 	uint8_t vsync_plr;
 	uint8_t pixelclk_plr;
@@ -410,6 +434,8 @@ struct mipi_dsi_phy_ctrl {
 
 	uint32_t phy_stop_wait_time;
 
+	uint32_t rg_lptx_sri;
+	uint32_t rg_vrefsel_lptx;
 	uint32_t rg_vrefsel_vcm;
 	uint32_t rg_hstx_ckg_sel;
 	uint32_t rg_pll_fbd_div5f;
@@ -446,6 +472,9 @@ struct mipi_dsi_phy_ctrl {
 	uint32_t rg_0p8v;
 	uint32_t rg_lpf_r;
 	uint32_t rg_cp;
+	uint32_t rg_pll_fbkdiv;
+	uint32_t rg_pll_prediv;
+	uint32_t rg_pll_posdiv;
 	uint32_t t_prepare;
 	uint32_t t_lpx;
 	uint32_t t_prebegin;
@@ -462,7 +491,7 @@ struct mipi_panel_info {
 	uint32_t burst_mode;
 	uint32_t max_tx_esc_clk;
 	uint8_t non_continue_en;
-	uint8_t hs_clk_disable_delay;
+	uint8_t txoff_rxulps_en;
 
 	uint32_t dsi_bit_clk_val1;
 	uint32_t dsi_bit_clk_val2;
@@ -488,6 +517,8 @@ struct mipi_panel_info {
 	uint32_t data_t_hs_zero_adjust;
 	uint32_t data_t_hs_trial_adjust;
 	uint32_t rg_vrefsel_vcm_adjust;
+	uint32_t rg_vrefsel_lptx_adjust;
+	uint32_t rg_lptx_sri_adjust;
 
 	/* only for 3660 use */
 	uint32_t rg_vrefsel_vcm_clk_adjust;
@@ -496,7 +527,7 @@ struct mipi_panel_info {
 	uint32_t phy_mode;  /* 0: DPHY, 1:CPHY */
 	uint32_t lp11_flag; /* 0: nomal_lp11, 1:short_lp11, 2:disable_lp11 */
 	uint32_t phy_m_n_count_update;  /* 0:old ,1:new can get 988.8M */
-
+	uint32_t eotp_disable_flag; /* 0: eotp enable, 1:eotp disable */
 };
 
 struct sbl_panel_info {
@@ -688,6 +719,7 @@ struct hisi_panel_info {
 	uint32_t bl_set_type;
 	uint32_t bl_min;
 	uint32_t bl_max;
+	uint32_t bl_def;
 	uint32_t bl_v200;
 	uint32_t bl_otm;
 	uint32_t bl_default;
@@ -695,6 +727,7 @@ struct hisi_panel_info {
 	uint32_t blpwm_preci_no_convert;
 	uint32_t blpwm_out_div_value;
 	uint32_t blpwm_input_ena;
+	uint32_t blpwm_input_disable;
 	uint32_t blpwm_in_num;
 	uint32_t blpwm_input_precision;
 	uint32_t bl_ic_ctrl_mode;
@@ -704,6 +737,12 @@ struct hisi_panel_info {
 	uint32_t vsync_ctrl_type;
 	uint32_t fake_external;
 	uint8_t  reserved[3];
+	char* panel_name;
+	char lcd_panel_version[LCD_PANEL_VERSION_SIZE];
+	uint32_t board_version;
+	uint8_t dbv_curve_mapped_support;
+	uint8_t is_dbv_need_mapped;
+	uint8_t dbv_map_index;
 
 	uint32_t ifbc_type;
 	uint32_t ifbc_cmp_dat_rev0;
@@ -731,6 +770,8 @@ struct hisi_panel_info {
 	uint8_t esd_enable;
 	uint8_t esd_skip_mipi_check;
 	uint8_t esd_recover_step;
+	uint8_t esd_expect_value_type;
+	uint32_t esd_recovery_max_count;
 	uint8_t dirty_region_updt_support;
 	uint8_t snd_cmd_before_frame_support;
 	uint8_t dsi_bit_clk_upt_support;
@@ -766,6 +807,19 @@ struct hisi_panel_info {
 	uint8_t smart_color_mode_support;
 
 	uint8_t noisereduction_support;
+
+	uint8_t gamma_pre_support;
+	uint32_t *gamma_pre_lut_table_R;
+	uint32_t *gamma_pre_lut_table_G;
+	uint32_t *gamma_pre_lut_table_B;
+	uint32_t gamma_pre_lut_table_len;
+	uint8_t xcc_pre_support;
+	uint32_t *xcc_pre_table;
+	uint32_t xcc_pre_table_len;
+	//uint32_t dual_lcd_top_left_x;
+	//uint32_t dual_lcd_top_left_y;
+	//uint32_t dual_lcd_bot_right_x;
+	//uint32_t dual_lcd_bot_right_y;
 
 	/* set xcc reg in isr func */
 	int xcc_set_in_isr_support;
@@ -1005,9 +1059,30 @@ struct hisi_panel_info {
 	uint32_t vcoeffuv_len;
 
 	uint8_t non_check_ldi_porch;
+	uint8_t hisync_mode;
+	uint8_t vsync_delay_time;
+	uint8_t video_idle_mode;
 
 	//dpi_set
 	uint8_t dpi01_exchange_flag;
+
+	uint8_t panel_mode_swtich_support;
+	uint8_t current_mode;
+	uint8_t mode_switch_to;
+	uint8_t mode_switch_state;
+
+	uint32_t mask_delay_time_before_fp;
+	uint32_t mask_delay_time_after_fp;
+	uint32_t vsync_delay_th;
+	uint32_t vsync_delay_time_fp;
+	uint32_t bl_delay_frame;
+	int need_skip_delta;
+	// elle need delay 3frames between bl and hbm code
+	uint32_t hbm_entry_delay;
+	// elle the time stamp for bl Code
+	ktime_t hbm_blcode_ts;
+
+	uint32_t elvss_dim_val;
 
 	struct spi_device *spi_dev;
 	struct ldi_panel_info ldi;
@@ -1023,6 +1098,13 @@ struct hisi_panel_info {
 	/* Contrast Alogrithm */
 	struct hiace_alg_parameter hiace_param;
 	struct ce_algorithm_parameter ce_alg_param;
+
+	//for cascade ic, set the correct display area for saving power
+	uint8_t cascadeic_support;
+	uint8_t current_display_region;
+
+	//for mipi dsi tx interface, support delayed cmd queue which will send after next frame start(vsync)
+	uint8_t delayed_cmd_queue_support;
 };
 
 struct hisi_fb_data_type;
@@ -1037,6 +1119,8 @@ struct hisi_fb_panel_data {
 	int (*lp_ctrl) (struct platform_device *pdev, bool lp_enter);
 	int (*remove) (struct platform_device *pdev);
 	int (*set_backlight) (struct platform_device *pdev, uint32_t bl_level);
+	int (*lcd_set_backlight_by_type_func) (struct platform_device *pdev, int backlight_type);
+	int (*lcd_set_hbm_for_mmi_func) (struct platform_device* pdev, int level);
 	int (*set_blc_brightness) (struct platform_device *pdev, uint32_t bl_level);
 	int (*sbl_ctrl) (struct platform_device *pdev, int enable);
 	int (*vsync_ctrl) (struct platform_device *pdev, int enable);
@@ -1048,7 +1132,10 @@ struct hisi_fb_panel_data {
 	int (*set_pixclk_rate) (struct platform_device *pdev);
 	int (*set_display_resolution) (struct platform_device *pdev);
 	int (*get_lcd_id) (struct platform_device *pdev);
+	int (*panel_bypass_powerdown_ulps_support) (struct platform_device *pdev);
+	int (*set_tcon_mode) (struct platform_device *pdev, uint8_t mode);
 
+	ssize_t (*snd_mipi_clk_cmd_store) (struct platform_device *pdev, uint32_t clk_val);
 	ssize_t (*lcd_model_show) (struct platform_device *pdev, char *buf);
 	ssize_t (*lcd_cabc_mode_show) (struct platform_device *pdev, char *buf);
 	ssize_t (*lcd_cabc_mode_store) (struct platform_device *pdev, const char *buf, size_t count);
@@ -1154,7 +1241,10 @@ int panel_next_vsync_ctrl(struct platform_device *pdev, int enable);
 int panel_next_esd_handle(struct platform_device *pdev);
 int panel_next_set_display_region(struct platform_device *pdev, struct dss_rect *dirty);
 int panel_next_get_lcd_id(struct platform_device *pdev);
+int panel_next_bypass_powerdown_ulps_support(struct platform_device *pdev);
 
+
+ssize_t panel_next_snd_mipi_clk_cmd_store(struct platform_device *pdev, uint32_t clk_val);
 ssize_t panel_next_lcd_model_show(struct platform_device *pdev, char *buf);
 ssize_t panel_next_lcd_cabc_mode_show(struct platform_device *pdev, char *buf);
 ssize_t panel_next_lcd_cabc_mode_store(struct platform_device *pdev, const char *buf, size_t count);
@@ -1195,6 +1285,7 @@ ssize_t panel_next_lcd_amoled_vr_mode_store(struct platform_device *pdev, const 
 ssize_t panel_next_lcd_amoled_vr_mode_show(struct platform_device *pdev, char *buf);
 ssize_t panel_next_alpm_setting_store(struct platform_device *pdev,	const char *buf, size_t count);
 
+void hisi_blpwm_fill_light(uint32_t backlight);
 int hisi_pwm_set_backlight(struct hisi_fb_data_type *hisifd, uint32_t bl_level);
 int hisi_pwm_off(struct platform_device *pdev);
 int hisi_pwm_on(struct platform_device *pdev);
@@ -1218,11 +1309,15 @@ bool is_mipi_cmd_panel(struct hisi_fb_data_type *hisifd);
 bool is_mipi_cmd_panel_ext(struct hisi_panel_info *pinfo);
 bool is_mipi_video_panel(struct hisi_fb_data_type *hisifd);
 bool is_dp_panel(struct hisi_fb_data_type *hisifd);
+bool is_hisync_mode(struct hisi_fb_data_type *hisifd);
+bool is_video_idle_ctrl_mode(struct hisi_fb_data_type *hisifd);
 bool is_mipi_panel(struct hisi_fb_data_type *hisifd);
 bool is_dual_mipi_panel(struct hisi_fb_data_type *hisifd);
 bool is_dual_mipi_panel_ext(struct hisi_panel_info *pinfo);
 bool is_ifbc_panel(struct hisi_fb_data_type *hisifd);
 bool is_ifbc_vesa_panel(struct hisi_fb_data_type *hisifd);
+ssize_t panel_mode_switch_store(struct hisi_fb_data_type *hisifd, const char *buf, size_t count);
+void panel_mode_switch_isr_handler(struct hisi_fb_data_type *hisifd, uint8_t mode_switch_to);
 bool mipi_panel_check_reg (struct hisi_fb_data_type *hisifd, uint32_t *read_value);
 int mipi_ifbc_get_rect(struct hisi_fb_data_type *hisifd, struct dss_rect *rect);
 bool is_hisi_writeback_panel(struct hisi_fb_data_type *hisifd);
@@ -1236,5 +1331,10 @@ bool hisi_fb_device_probe_defer(uint32_t panel_type, uint32_t bl_type);
 void panel_check_status_and_report_by_dsm(struct lcd_reg_read_t *lcd_status_reg, int cnt, char __iomem *mipi_dsi0_base);
 void panel_status_report_by_dsm(struct lcd_reg_read_t *lcd_status_reg, int cnt, char __iomem *mipi_dsi0_base, int report_cnt);
 #endif
+#ifdef CONFIG_LCD_KIT_DRIVER
+int hisi_blpwm_set_bl(struct hisi_fb_data_type *hisifd, uint32_t bl_level);
+#endif
 
+int panel_next_tcon_mode(struct platform_device *pdev, struct hisi_panel_info *pinfo);
+int panel_set_display_region(struct hisi_fb_data_type *hisifd, void __user *argp);
 #endif /* HISI_FB_PANEL_H */

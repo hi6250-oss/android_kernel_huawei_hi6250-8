@@ -24,10 +24,8 @@
 #define TI_LM36923_LED_TWO 2
 #define TI_LM36923_LED_THREE 3
 
-#define REG_MAX 0x1F
 #define MAX_RATE_NUM 9
 /* base reg */
-#define REG_REVISION 0x00
 #define REG_SOFT_REST 0x01
 #define REG_ENABLE 0x10
 #define REG_BRT_CTR 0x11
@@ -56,7 +54,6 @@
 #define MASK_BL_LSB 0x07
 
 #define BL_MIN 0
-#define BL_MAX 2047
 
 #ifndef BIT
 #define BIT(x)  (1<<(x))
@@ -73,9 +70,7 @@
 #define TEST_ERROR_LED1_SHORT BIT(7)
 #define TEST_ERROR_LED2_SHORT BIT(8)
 #define TEST_ERROR_LED3_SHORT BIT(9)
-#define TEST_ERROR_CHIP_INIT BIT(10)
 
-#define LOG_LEVEL_INFO 7
 #define LM36923_RW_REG_MAX 14
 #define LM36923_EMERG(msg, ...)    \
 	do { if (lm36923_msg_level > 0)  \

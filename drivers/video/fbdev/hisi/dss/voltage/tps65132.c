@@ -48,6 +48,9 @@ static bool fastboot_display_enable = true;
 #define DTS_COMP_TIANMA_R63319_8P4 "hisilicon,mipi_tianma_R63319_8p4"
 #define DTS_COMP_SHARP_NT35523_8P4 "hisilicon,mipi_sharp_NT35523_8p4"
 #define DTS_COMP_SHARP_TD4322_5P5 "hisilicon,mipi_sharp_TD4322_5P5"
+#define DTS_COMP_SHARP_NT36870 "hisilicon,mipi_sharp_NT36870"
+#define DTS_COMP_BOE_TD4320 "hisilicon,mipi_boe_TD4320"
+
 #define VAL_5V5 0
 #define VAL_5V8 1
 #define VAL_5V6 2
@@ -104,6 +107,21 @@ static int get_lcd_type(void)
 		HISI_FB_INFO("device %s! set voltage 5.8V\n", DTS_COMP_SHARP_TD4322_5P5);
 		return VAL_5V8;
 	}
+
+	np = of_find_compatible_node(NULL, NULL, DTS_COMP_SHARP_NT36870);
+	ret = of_device_is_available(np);
+	if (np && ret) {
+		HISI_FB_INFO("device %s! set voltage 5.8V\n", DTS_COMP_SHARP_NT36870);
+		return VAL_5V8;
+	}
+
+	np = of_find_compatible_node(NULL, NULL, DTS_COMP_BOE_TD4320);
+	ret = of_device_is_available(np);
+	if (np && ret) {
+		HISI_FB_INFO("device %s! set voltage 5.5V\n", DTS_COMP_BOE_TD4320);
+		return VAL_5V5;
+	}
+
 	HISI_FB_INFO("not found device %s! set voltage 5.5V\n", DTS_COMP_SHARP_NT35695_5P5);
 	return VAL_5V5;
 }
@@ -211,8 +229,6 @@ static int tps65132_reg_init(struct i2c_client *client, u8 vpos_cmd, u8 vneg_cmd
 exit:
 	return nRet;
 }
-
-
 static void tps65132_get_target_voltage(int *vpos_target, int *vneg_target)
 {
 	int ret = 0;
@@ -230,6 +246,7 @@ static void tps65132_get_target_voltage(int *vpos_target, int *vneg_target)
 		*vneg_target = lcdkit_get_vsn_voltage();
 		return;
 	}
+
 
 	ret = get_lcd_type();
 	if (ret == VAL_5V8) {
@@ -320,6 +337,7 @@ static int tps65132_finish_setting(void)
 	return retval;
 }
 
+
 static int tps65132_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int retval = 0;
@@ -366,7 +384,7 @@ static int tps65132_probe(struct i2c_client *client, const struct i2c_device_id 
 	if (nRet > 0) {
 		pr_info("tps65132 inited needn't reset value\n");
 	} else if (nRet < 0) {
-		pr_err("tps65132 I2C read fail\n");
+		pr_err("tps65132 I2C read not success\n");
 		retval = -ENODEV;
 		goto failed_2;
 	} else {
@@ -381,6 +399,7 @@ static int tps65132_probe(struct i2c_client *client, const struct i2c_device_id 
 
 		/* detect current device successful, set the flag as present */
 		set_hw_dev_flag(DEV_I2C_DC_DC);
+
 
 failed_2:
 	if (!fastboot_display_enable) {

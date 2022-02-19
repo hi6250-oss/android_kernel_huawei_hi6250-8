@@ -22,6 +22,11 @@ static int hisi_spi_probe (struct spi_device *spi_dev)
 	struct device_node *np = NULL;
 	uint32_t fpga_flag = 0;
 
+	if (spi_dev == NULL) {
+		HISI_FB_ERR("spi_dev is NULL");
+		return -1;
+	}
+
 	np = of_find_compatible_node(NULL, NULL, DEV_NAME_SPI);
 	if (!np) {
 		HISI_FB_ERR("NOT FOUND device node %s!\n", DEV_NAME_SPI);

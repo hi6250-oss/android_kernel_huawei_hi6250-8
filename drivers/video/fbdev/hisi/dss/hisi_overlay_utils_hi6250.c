@@ -13,7 +13,6 @@
 
 #include "hisi_overlay_utils.h"
 
-
 uint32_t g_dss_module_base[DSS_CHN_MAX_DEFINE][MODULE_CHN_MAX] = {
 	/* D2 */
 	{
@@ -345,7 +344,7 @@ void hisi_dss_qos_on(struct hisi_fb_data_type *hisifd)
 /*******************************************************************************
 ** DSS AIF
 */
-void hisi_dss_aif_init(char __iomem *aif_ch_base,
+void hisi_dss_aif_init(const char __iomem *aif_ch_base,
 	dss_aif_t *s_aif)
 {
 	if (NULL == aif_ch_base) {
@@ -442,7 +441,7 @@ int hisi_dss_aif_ch_config(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov_
 	if (g_fpga_flag == 0) {
 		if ((ovl_idx == DSS_OVL2) || (ovl_idx == DSS_OVL3)) {
 			if (layer) {
-				dss_core_rate = hisifd->dss_clk_rate.dss_pri_clk_rate;
+				dss_core_rate = hisifd->dss_vote_cmd.dss_pri_clk_rate;
 				if (dss_core_rate == 0) {
 					HISI_FB_ERR("fb%d, dss_core_rate(%llu) is invalid!",
 						hisifd->index, dss_core_rate);
@@ -573,7 +572,7 @@ int hisi_dss_aif1_ch_config(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov
 	if (g_fpga_flag == 0) {
 		if ((ovl_idx == DSS_OVL0) || (ovl_idx == DSS_OVL1)) {
 			if (layer && (layer->need_cap & CAP_AFBCD)) {
-				dss_core_rate = hisifd->dss_clk_rate.dss_pri_clk_rate;
+				dss_core_rate = hisifd->dss_vote_cmd.dss_pri_clk_rate;
 				if (dss_core_rate == 0) {
 					HISI_FB_ERR("fb%d, dss_core_rate(%llu) is invalid!",
 						hisifd->index, dss_core_rate);
@@ -620,7 +619,7 @@ int hisi_dss_aif1_ch_config(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov
 			}
 		} else {
 			if (layer && (layer->need_cap & CAP_AFBCD)) {
-				dss_core_rate = hisifd->dss_clk_rate.dss_pri_clk_rate;
+				dss_core_rate = hisifd->dss_vote_cmd.dss_pri_clk_rate;
 				if (dss_core_rate == 0) {
 					HISI_FB_ERR("fb%d, dss_core_rate(%llu is invalid!",
 						hisifd->index, dss_core_rate);
@@ -686,8 +685,6 @@ void hisi_dss_smmu_on(struct hisi_fb_data_type *hisifd)
 	int idx1 = 0;
 	int idx2 = 0;
 	int idx3 = 0;
-	uint32_t phy_pgd_base = 0;
-	struct iommu_domain_data *domain_data = NULL;
 	uint64_t smmu_rwerraddr_phys = 0;
 
 	if (NULL == hisifd) {
@@ -747,9 +744,7 @@ void hisi_dss_smmu_on(struct hisi_fb_data_type *hisifd)
 	set_reg(smmu_base + SMMU_SMRx + idx3 * 0x4, 0x9, 32, 0);
 
 	//TTBR0
-	domain_data = (struct iommu_domain_data *)(hisifd->hisi_domain->priv);
-	phy_pgd_base = (uint32_t)(domain_data->phy_pgd_base);
-	set_reg(smmu_base + SMMU_CB_TTBR0, phy_pgd_base, 32, 0);
+	set_reg(smmu_base + SMMU_CB_TTBR0, (uint32_t)hisi_dss_domain_get_ttbr(), 32, 0);
 }
 
 void hisi_dss_smmu_init(char __iomem *smmu_base,
@@ -996,7 +991,7 @@ static int CSC_COE_RGB2YUV709_WIDE[CSC_ROW][CSC_COL] = {
 	{0x083, 0x78a, 0x7f5, 0x0, 0x080},
 };
 
-void hisi_dss_csc_init(char __iomem *csc_base, dss_csc_t *s_csc)
+void hisi_dss_csc_init(const char __iomem *csc_base, dss_csc_t *s_csc)
 {
 	if (NULL == csc_base) {
 		HISI_FB_ERR("csc_base is NULL");
@@ -1158,7 +1153,7 @@ int hisi_dss_csc_config(struct hisi_fb_data_type *hisifd,
 }
 
 /*lint -e679 -e730 -e732*/
-void hisi_dss_ovl_init(char __iomem *ovl_base, dss_ovl_t *s_ovl, int ovl_idx)
+void hisi_dss_ovl_init(const char __iomem *ovl_base, dss_ovl_t *s_ovl, int ovl_idx)
 {
 	int i = 0;
 
@@ -1538,6 +1533,41 @@ uint32_t hisi_dss_mif_get_invalid_sel(dss_img_t *img, uint32_t transform, int v_
 	return invalid_sel_val;
 }
 
+static int hisi_dss_check_userdata_base(dss_overlay_t *pov_req, dss_overlay_block_t *pov_h_block_infos, uint32_t index)
+{
+	if (pov_req == NULL) {
+		HISI_FB_ERR("fb%d, invalid pov_req!", index);
+		return -EINVAL;
+	}
+
+	if (pov_h_block_infos == NULL) {
+		HISI_FB_ERR("fb%d, invalid pov_h_block_infos!", index);
+		return -EINVAL;
+	}
+
+	if ((pov_req->ov_block_nums <= 0) ||
+		(pov_req->ov_block_nums > HISI_DSS_OV_BLOCK_NUMS)) {
+		HISI_FB_ERR("fb%d, invalid ov_block_nums=%d!",
+			index, pov_req->ov_block_nums);
+		return -EINVAL;
+	}
+
+	if ((pov_h_block_infos->layer_nums <= 0)
+		|| (pov_h_block_infos->layer_nums > OVL_LAYER_NUM_MAX)) {
+		HISI_FB_ERR("fb%d, invalid layer_nums=%d!",
+			index, pov_h_block_infos->layer_nums);
+		return -EINVAL;
+	}
+
+	if ((pov_req->ovl_idx < 0) ||
+		pov_req->ovl_idx >= DSS_OVL_IDX_MAX) {
+		HISI_FB_ERR("fb%d, invalid ovl_idx=%d!",
+			index, pov_req->ovl_idx);
+		return -EINVAL;
+	}
+	return 0;
+}
+
 int hisi_dss_check_userdata(struct hisi_fb_data_type *hisifd,
 	dss_overlay_t *pov_req, dss_overlay_block_t *pov_h_block_infos)
 {
@@ -1559,24 +1589,7 @@ int hisi_dss_check_userdata(struct hisi_fb_data_type *hisifd,
 		return -EINVAL;
 	}
 
-	if ((pov_req->ov_block_nums <= 0) ||
-		(pov_req->ov_block_nums > HISI_DSS_OV_BLOCK_NUMS)) {
-		HISI_FB_ERR("fb%d, invalid ov_block_nums=%d!",
-			hisifd->index, pov_req->ov_block_nums);
-		return -EINVAL;
-	}
-
-	if ((pov_h_block_infos->layer_nums <= 0)
-		|| (pov_h_block_infos->layer_nums > OVL_LAYER_NUM_MAX)) {
-		HISI_FB_ERR("fb%d, invalid layer_nums=%d!",
-			hisifd->index, pov_h_block_infos->layer_nums);
-		return -EINVAL;
-	}
-
-	if ((pov_req->ovl_idx < 0) ||
-		pov_req->ovl_idx >= DSS_OVL_IDX_MAX) {
-		HISI_FB_ERR("fb%d, invalid ovl_idx=%d!",
-			hisifd->index, pov_req->ovl_idx);
+	if (hisi_dss_check_userdata_base(pov_req, pov_h_block_infos, hisifd->index) < 0) {
 		return -EINVAL;
 	}
 
@@ -1636,7 +1649,6 @@ int hisi_dss_check_userdata(struct hisi_fb_data_type *hisifd,
 					wb_layer->dst.stride);
 				return -EINVAL;
 			}
-
 
 			if (wb_layer->need_cap & CAP_AFBCE) {
 				if ((wb_layer->dst.afbc_header_stride == 0) || (wb_layer->dst.afbc_payload_stride == 0)) {
@@ -1737,7 +1749,6 @@ int hisi_dss_check_layer_par(struct hisi_fb_data_type *hisifd, dss_layer_t *laye
 		return -EINVAL;
 	}
 
-
 	if (layer->need_cap & CAP_AFBCD) {
 		if ((layer->img.afbc_header_stride == 0) || (layer->img.afbc_payload_stride == 0)
 			|| (layer->img.mmbuf_size == 0)) {
@@ -1790,7 +1801,7 @@ void hisifb_dss_disreset(struct hisi_fb_data_type *hisifd)
 }
 
 /*lint -e732*/
-void hisi_dss_mctl_sys_init(char __iomem *mctl_sys_base, dss_mctl_sys_t *s_mctl_sys)
+void hisi_dss_mctl_sys_init(const char __iomem *mctl_sys_base, dss_mctl_sys_t *s_mctl_sys)
 {
 	int i;
 

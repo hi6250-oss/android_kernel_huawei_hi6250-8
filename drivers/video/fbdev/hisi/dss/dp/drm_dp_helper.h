@@ -584,7 +584,7 @@
 
 #define DP_LINK_STATUS_SIZE	   6
 bool drm_dp_channel_eq_ok(const uint8_t link_status[DP_LINK_STATUS_SIZE],
-			  int lane_count);
+			  uint8_t lane_count);
 bool drm_dp_clock_recovery_ok(const uint8_t link_status[DP_LINK_STATUS_SIZE],
 			      int lane_count);
 uint8_t drm_dp_get_adjust_request_voltage(const uint8_t link_status[DP_LINK_STATUS_SIZE],

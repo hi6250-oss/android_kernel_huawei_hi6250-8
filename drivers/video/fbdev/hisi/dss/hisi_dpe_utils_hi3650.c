@@ -34,10 +34,10 @@ static  uint32_t sbl_al_calib_lut[33] = {
 	51199,53247,55295,57343,59391,61439,63487,65535
 };
 
-struct dss_clk_rate * get_dss_clk_rate(struct hisi_fb_data_type *hisifd)
+struct dss_vote_cmd * get_dss_vote_cmd(struct hisi_fb_data_type *hisifd)
 {
 	struct hisi_panel_info *pinfo = NULL;
-	struct dss_clk_rate *pdss_clk_rate = NULL;
+	struct dss_vote_cmd *pdss_vote_cmd = NULL;
 
 	if (NULL == hisifd) {
 		HISI_FB_ERR("hisifd is NULL");
@@ -45,41 +45,41 @@ struct dss_clk_rate * get_dss_clk_rate(struct hisi_fb_data_type *hisifd)
 	}
 
 	pinfo = &(hisifd->panel_info);
-	pdss_clk_rate = &(hisifd->dss_clk_rate);
+	pdss_vote_cmd = &(hisifd->dss_vote_cmd);
 
 	/* FIXME: TBD  */
 	if (g_fpga_flag == 1) {
-		if (pdss_clk_rate->dss_pclk_dss_rate == 0) {
-			pdss_clk_rate->dss_pri_clk_rate = 40 * 1000000UL;
-			pdss_clk_rate->dss_pclk_dss_rate = 20 * 1000000UL;
-			pdss_clk_rate->dss_pclk_pctrl_rate = 20 * 1000000UL;
+		if (pdss_vote_cmd->dss_pclk_dss_rate == 0) {
+			pdss_vote_cmd->dss_pri_clk_rate = 40 * 1000000UL;
+			pdss_vote_cmd->dss_pclk_dss_rate = 20 * 1000000UL;
+			pdss_vote_cmd->dss_pclk_pctrl_rate = 20 * 1000000UL;
 		}
 	} else {
-		if (pdss_clk_rate->dss_pclk_dss_rate == 0) {
+		if (pdss_vote_cmd->dss_pclk_dss_rate == 0) {
 			if ((pinfo->xres * pinfo->yres) >= (2560 * 1600)) {
-				pdss_clk_rate->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
-				pdss_clk_rate->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
-				pdss_clk_rate->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
+				pdss_vote_cmd->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
+				pdss_vote_cmd->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
+				pdss_vote_cmd->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
 			} else if ((pinfo->xres * pinfo->yres) >= (1920 * 1080)) {
-				pdss_clk_rate->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
-				pdss_clk_rate->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
-				pdss_clk_rate->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
+				pdss_vote_cmd->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
+				pdss_vote_cmd->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
+				pdss_vote_cmd->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
 			} else if ((pinfo->xres * pinfo->yres) >= (1280 * 720)) {
-				pdss_clk_rate->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
-				pdss_clk_rate->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
-				pdss_clk_rate->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
+				pdss_vote_cmd->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
+				pdss_vote_cmd->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
+				pdss_vote_cmd->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
 			} else {
-				pdss_clk_rate->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
-				pdss_clk_rate->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
-				pdss_clk_rate->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
+				pdss_vote_cmd->dss_pri_clk_rate = DEFAULT_DSS_CORE_CLK_RATE;
+				pdss_vote_cmd->dss_pclk_dss_rate = DEFAULT_PCLK_DSS_RATE;
+				pdss_vote_cmd->dss_pclk_pctrl_rate = DEFAULT_PCLK_PCTRL_RATE;
 			}
 		}
 	}
 
-	return pdss_clk_rate;
+	return pdss_vote_cmd;
 }
 
-int set_dss_clk_rate(struct hisi_fb_data_type *hisifd, dss_clk_rate_t dss_clk_rate)
+int set_dss_vote_cmd(struct hisi_fb_data_type *hisifd, dss_vote_cmd_t dss_vote_cmd)
 {
 	int ret = 0;
 
@@ -88,8 +88,39 @@ int set_dss_clk_rate(struct hisi_fb_data_type *hisifd, dss_clk_rate_t dss_clk_ra
 		return -EINVAL;
 	}
 
-
 	return ret;
+}
+
+#define PERI_VOLTAGE_LEVEL0_070V		(0) // 0.7v
+#define PERI_VOLTAGE_LEVEL1_080V		(2) // 0.8v
+int dpe_get_voltage_value(dss_vote_cmd_t *vote_cmd)
+{
+	if (!vote_cmd) {
+		HISI_FB_ERR("vote_cmd is null\n");
+		return -1;
+	}
+	switch (vote_cmd->dss_voltage_level) {
+		case PERI_VOLTAGE_LEVEL0:
+			return PERI_VOLTAGE_LEVEL0_070V; // 0: 0.7v
+		case PERI_VOLTAGE_LEVEL1:
+			return PERI_VOLTAGE_LEVEL1_080V; // 2: 0.8v
+		default:
+			HISI_FB_ERR("not support dss_voltage_level is %d\n", vote_cmd->dss_voltage_level);
+			return -1;
+	}
+}
+
+int dpe_get_voltage_level(int votage_value)
+{
+	switch (votage_value) {
+		case PERI_VOLTAGE_LEVEL0_070V: // 0: 0.7v
+			return PERI_VOLTAGE_LEVEL0;
+		case PERI_VOLTAGE_LEVEL1_080V: // 2: 0.8v
+			return PERI_VOLTAGE_LEVEL1;
+		default:
+			HISI_FB_ERR("not support votage_value is %d\n", votage_value);
+			return PERI_VOLTAGE_LEVEL0;
+	}
 }
 
 void dss_inner_clk_common_enable(struct hisi_fb_data_type *hisifd, bool fastboot_enable)
@@ -1013,8 +1044,14 @@ void init_dbuf(struct hisi_fb_data_type *hisifd)
 			thd_cg_out = (dfs_time * pinfo->pxl_clk_rate * pinfo->xres) /
 				(((pinfo->ldi.h_pulse_width + pinfo->ldi.h_back_porch + pinfo->ldi.h_front_porch) * pinfo->pxl_clk_rate_div
 				+ pinfo->xres) * 6 * 1000000UL);
-			sram_valid_num = thd_cg_out / depth;
-			thd_cg_in = (sram_valid_num + 1) * depth - 1;
+			if (thd_cg_out >= MAX_DEPTH -2) {
+				sram_valid_num = 1;
+				thd_cg_in = MAX_DEPTH - 1;
+				thd_cg_out = thd_cg_in - 1;
+			} else {
+				sram_valid_num = thd_cg_out / depth;
+				thd_cg_in = (sram_valid_num + 1) * depth - 1;
+			}
 
 			thd_rqos_in = thd_cg_out * 85 / 100;
 			thd_rqos_out = thd_cg_out;
@@ -1709,6 +1746,83 @@ void init_acm(struct hisi_fb_data_type *hisifd)
 	g_acm_State = 1;
 }
 
+static bool _check_igm_lut(struct hisi_panel_info *pinfo, char __iomem *dpp_base)
+{
+	uint32_t i = 0;
+	uint32_t reg;
+
+	for (i = 0; i < pinfo->igm_lut_table_len; i++) {
+		reg = inp32(dpp_base + (LUT_IGM_R_COEF_OFFSET +  i * 4));
+		if( reg != pinfo->igm_lut_table_R[i]) {
+			HISI_FB_ERR("igm[%d]: R verify fail, reg=%x, table=%x", i, reg, pinfo->igm_lut_table_R[i]);
+			return false;
+		}
+
+		reg = inp32(dpp_base + (LUT_IGM_G_COEF_OFFSET +  i * 4));
+		if( reg != pinfo->igm_lut_table_G[i]) {
+			HISI_FB_ERR("igm[%d]: G verify fail, reg=%x, table=%x", i, reg, pinfo->igm_lut_table_G[i]);
+			return false;
+		}
+
+		reg = inp32(dpp_base + (LUT_IGM_B_COEF_OFFSET +  i * 4));
+		if( reg != pinfo->igm_lut_table_G[i]) {
+			HISI_FB_ERR("igm[%d]: B verify fail, reg=%x, table=%x", i, reg, pinfo->igm_lut_table_B[i]);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool _check_gamma_lut(struct hisi_panel_info *pinfo, char __iomem *dpp_base) {
+	uint32_t i = 0;
+	uint32_t reg;
+
+	for (i = 0; i < pinfo->gamma_lut_table_len; i++) {
+		reg = inp32(dpp_base + (LUT_GAMA_R_COEF_OFFSET +  i * 4));
+		if( reg != pinfo->gamma_lut_table_R[i]) {
+			HISI_FB_ERR("gamma[%d]: R verify fail, reg=%x, table=%x", i, reg, pinfo->gamma_lut_table_R[i]);
+			return false;
+		}
+
+		reg = inp32(dpp_base + (LUT_GAMA_G_COEF_OFFSET +  i * 4));
+		if( reg != pinfo->gamma_lut_table_G[i]) {
+			HISI_FB_ERR("gamma[%d]: G verify fail, reg=%x, table=%x", i, reg, pinfo->gamma_lut_table_G[i]);
+			return false;
+		}
+
+		reg = inp32(dpp_base + (LUT_GAMA_B_COEF_OFFSET +  i * 4));
+		if( reg != pinfo->gamma_lut_table_B[i]) {
+			HISI_FB_ERR("gamma[%d]: B verify fail, reg=%x, table=%x", i, reg, pinfo->gamma_lut_table_B[i]);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static void _write_igm_lut(struct hisi_panel_info *pinfo, char __iomem *dpp_base)
+{
+	uint32_t i = 0;
+
+	for (i = 0; i < pinfo->igm_lut_table_len; i++) {
+		outp32(dpp_base + (LUT_IGM_R_COEF_OFFSET +  i * 4), pinfo->igm_lut_table_R[i]);
+		outp32(dpp_base + (LUT_IGM_G_COEF_OFFSET +  i * 4), pinfo->igm_lut_table_G[i]);
+		outp32(dpp_base + (LUT_IGM_B_COEF_OFFSET +  i * 4), pinfo->igm_lut_table_B[i]);
+	}
+}
+
+static void _write_gamma_lut(struct hisi_panel_info *pinfo, char __iomem *dpp_base)
+{
+	uint32_t i = 0;
+
+	for (i = 0; i < pinfo->gamma_lut_table_len; i++) {
+		outp32(dpp_base + (LUT_GAMA_R_COEF_OFFSET + i * 4), pinfo->gamma_lut_table_R[i]);
+		outp32(dpp_base + (LUT_GAMA_G_COEF_OFFSET + i * 4), pinfo->gamma_lut_table_G[i]);
+		outp32(dpp_base + (LUT_GAMA_B_COEF_OFFSET + i * 4), pinfo->gamma_lut_table_B[i]);
+	}
+}
+
 void init_igm_gmp_xcc_gm(struct hisi_fb_data_type *hisifd)
 {
 	struct hisi_panel_info *pinfo = NULL;
@@ -1758,10 +1872,13 @@ void init_igm_gmp_xcc_gm(struct hisi_fb_data_type *hisifd)
 			&& pinfo->igm_lut_table_R
 			&& pinfo->igm_lut_table_G
 			&& pinfo->igm_lut_table_B) {
-			for (i = 0; i < pinfo->igm_lut_table_len; i++) {
-				outp32(dpp_base + (LUT_IGM_R_COEF_OFFSET +  i * 4), pinfo->igm_lut_table_R[i]);
-				outp32(dpp_base + (LUT_IGM_G_COEF_OFFSET +  i * 4), pinfo->igm_lut_table_G[i]);
-				outp32(dpp_base + (LUT_IGM_B_COEF_OFFSET +  i * 4), pinfo->igm_lut_table_B[i]);
+			_write_igm_lut(pinfo, dpp_base);
+
+			//auto check test
+			if (is_mipi_video_panel(hisifd)) {
+				if(!_check_igm_lut(pinfo, dpp_base))	{
+					_write_igm_lut(pinfo, dpp_base);
+				}
 			}
 		}
 
@@ -1770,10 +1887,13 @@ void init_igm_gmp_xcc_gm(struct hisi_fb_data_type *hisifd)
 			&& pinfo->gamma_lut_table_R
 			&& pinfo->gamma_lut_table_G
 			&& pinfo->gamma_lut_table_B) {
-			for (i = 0; i < pinfo->gamma_lut_table_len; i++) {
-				outp32(dpp_base + (LUT_GAMA_R_COEF_OFFSET + i * 4), pinfo->gamma_lut_table_R[i]);
-				outp32(dpp_base + (LUT_GAMA_G_COEF_OFFSET + i * 4), pinfo->gamma_lut_table_G[i]);
-				outp32(dpp_base + (LUT_GAMA_B_COEF_OFFSET + i * 4), pinfo->gamma_lut_table_B[i]);
+			_write_gamma_lut(pinfo, dpp_base);
+
+			//auto check test
+			if (is_mipi_video_panel(hisifd)) {
+				if(!_check_gamma_lut(pinfo, dpp_base)) {
+					_write_gamma_lut(pinfo, dpp_base);
+				}
 			}
 		}
 
@@ -1842,7 +1962,7 @@ void init_igm_gmp_xcc_gm(struct hisi_fb_data_type *hisifd)
 			outp32(lcp_base + LCP_XCC_COEF_21, pinfo->xcc_table[9]);
 			outp32(lcp_base + LCP_XCC_COEF_22, pinfo->xcc_table[10]);
 			outp32(lcp_base + LCP_XCC_COEF_23, pinfo->xcc_table[11]
-				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value)
+				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value) / CHANGE_MAX
 				* color_temp_rectify_B / 32768);
 		}
 
@@ -1936,7 +2056,7 @@ int dpe_set_ct_cscValue(struct hisi_fb_data_type *hisifd)
 			outp32(lcp_base + LCP_XCC_COEF_21, pinfo->xcc_table[9]);
 			outp32(lcp_base + LCP_XCC_COEF_22, pinfo->xcc_table[10]);
 			outp32(lcp_base + LCP_XCC_COEF_23, pinfo->xcc_table[11]
-				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value)
+				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value) / CHANGE_MAX
 				* color_temp_rectify_B / 32768);
 			hisifd->color_temperature_flag = 2;
 		}
@@ -2014,7 +2134,7 @@ int dpe_set_xcc_cscValue(struct hisi_fb_data_type *hisifd)
 			outp32(lcp_base + LCP_XCC_COEF_21, pinfo->xcc_table[9]);
 			outp32(lcp_base + LCP_XCC_COEF_22, pinfo->xcc_table[10]);
 			outp32(lcp_base + LCP_XCC_COEF_23, pinfo->xcc_table[11]
-				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value)
+				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value) / CHANGE_MAX
 				* color_temp_rectify_B / 32768);
 		}
 	}
@@ -2071,7 +2191,7 @@ int dpe_set_comform_ct_cscValue(struct hisi_fb_data_type *hisifd)
 			outp32(lcp_base + LCP_XCC_COEF_21, pinfo->xcc_table[9]);
 			outp32(lcp_base + LCP_XCC_COEF_22, pinfo->xcc_table[10]);
 			outp32(lcp_base + LCP_XCC_COEF_23, pinfo->xcc_table[11]
-				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value)
+				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value) / CHANGE_MAX
 				* color_temp_rectify_B / 32768);
 		}
 	}
@@ -2182,7 +2302,7 @@ int dpe_set_led_rg_ct_cscValue(struct hisi_fb_data_type *hisifd)
 			outp32(lcp_base + LCP_XCC_COEF_21, pinfo->xcc_table[9]);
 			outp32(lcp_base + LCP_XCC_COEF_22, pinfo->xcc_table[10]);
 			outp32(lcp_base + LCP_XCC_COEF_23, pinfo->xcc_table[11]
-				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value)
+				* g_led_rg_csc_value[8] / 32768 * DISCOUNT_COEFFICIENT(g_comform_value) / CHANGE_MAX
 				* color_temp_rectify_B / 32768);
 		}
 	}

@@ -18,6 +18,7 @@
 
 #include "lcdkit_fb_util.h"
 
+
 #define MAX_BUF 60
 
 void set_reg(char __iomem *addr, uint32_t val, uint8_t bw, uint8_t bs)
@@ -149,7 +150,7 @@ void hisifb_save_file(char *filename, char *buf, uint32_t buf_len)
 	}
 
 	old_fs = get_fs();
-	set_fs(KERNEL_DS);
+	set_fs(KERNEL_DS); //lint !e501
 
 	write_len = vfs_write(fd, (char __user*)buf, buf_len, &pos);
 
@@ -198,18 +199,24 @@ int hisifb_ctrl_on(struct hisi_fb_data_type *hisifd)
 		HISI_FB_ERR("hisifd is NULL");
 		return -EINVAL;
 	}
+
 	pdata = dev_get_platdata(&hisifd->pdev->dev);
+
 	if (NULL == pdata) {
 		HISI_FB_ERR("pdata is NULL");
 		return -EINVAL;
 	}
 
-
 	if (pdata->on) {
 		ret = pdata->on(hisifd->pdev);
+		if (ret < 0) {
+			HISI_FB_ERR("regulator/clk on fail.\n");
+			return ret;
+		}
 	}
 
 	hisifb_vsync_resume(hisifd);
+
 
 	hisi_overlay_on(hisifd, false);
 
@@ -217,8 +224,6 @@ int hisifb_ctrl_on(struct hisi_fb_data_type *hisifd)
 		hrtimer_start(&hisifd->esd_ctrl.esd_hrtimer, ktime_set(ESD_CHECK_TIME_PERIOD / 1000,
 			(ESD_CHECK_TIME_PERIOD % 1000) * 1000000), HRTIMER_MODE_REL);
 	}
-
-
 	return ret;
 }
 
@@ -245,6 +250,7 @@ int hisifb_ctrl_off(struct hisi_fb_data_type *hisifd)
 
 	hisi_overlay_off(hisifd);
 
+
 	if (pdata->off) {
 		ret = pdata->off(hisifd->pdev);
 	}
@@ -252,8 +258,10 @@ int hisifb_ctrl_off(struct hisi_fb_data_type *hisifd)
 	// FIXME:
 	if ((hisifd->index == PRIMARY_PANEL_IDX) ||
 		(hisifd->index == EXTERNAL_PANEL_IDX)) {
+		down(&hisifd->buf_sync_ctrl.layerbuf_sem);
 		//ov base display ok, disable irq, now layerbuf unlock
 		hisifb_layerbuf_unlock(hisifd, &(hisifd->buf_sync_ctrl.layerbuf_list));
+		up(&hisifd->buf_sync_ctrl.layerbuf_sem);
 	}
 
 	return ret;
@@ -306,7 +314,7 @@ int hisifb_ctrl_esd(struct hisi_fb_data_type *hisifd)
 		return -EINVAL;
 	}
 
-	down(&hisifd->brightness_esd_sem);
+	down(&hisifd->power_sem);
 
 	if (!hisifd->panel_power_on) {
 		HISI_FB_DEBUG("fb%d, panel power off!\n", hisifd->index);
@@ -322,7 +330,7 @@ int hisifb_ctrl_esd(struct hisi_fb_data_type *hisifd)
 	}
 
 err_out:
-	up(&hisifd->brightness_esd_sem);
+	up(&hisifd->power_sem);
 
 	return ret;
 }
@@ -332,7 +340,7 @@ int hisifb_ctrl_sbl(struct fb_info *info, int value)
 	int ret = 0;
 	struct hisi_fb_data_type *hisifd = NULL;
 	struct hisi_fb_panel_data *pdata = NULL;
-	int  bl_level = 0;
+	uint32_t  bl_level = 0;
 	int tmp = 0;
 
 	if (NULL == info) {
@@ -389,7 +397,7 @@ int hisifb_ctrl_sbl(struct fb_info *info, int value)
 
 	bl_level= (hisifd->bl_level * 255 / hisifd->panel_info.bl_max) & 0xff;
 	bl_level = bl_level - bl_level * 20 /255 + 20;
-	HISI_FB_DEBUG("sbl bl_level = 0x%x \n", bl_level);
+	HISI_FB_DEBUG("sbl bl_level = 0x%x \n", bl_level); //lint !e559
 
 	tmp = bl_level & 0xff;
 	hisifd->sbl.sbl_backlight_l = set_bits32(hisifd->sbl.sbl_backlight_l, tmp, 8, 0);
@@ -447,11 +455,9 @@ err_out:
 /*lint -e644 -e540*/
 int hisifb_ctrl_dss_voltage_get(struct fb_info *info, void __user *argp)
 {
+	int voltage_value = 0;
 	struct hisi_fb_data_type *hisifd;
-	dss_clk_rate_t dss_vol_clk_rate;
-	uint32_t dss_voltage_value_level1;
-	uint32_t dss_voltage_value_level2;
-	uint32_t dss_voltage_value_level3;
+	dss_vote_cmd_t dss_vote_cmd;
 
 	if (NULL == info) {
 		HISI_FB_ERR("dss voltage get info NULL Pointer!\n");
@@ -480,37 +486,13 @@ int hisifb_ctrl_dss_voltage_get(struct fb_info *info, void __user *argp)
 			return 0;
 		}
 	}
-
-	memset(&dss_vol_clk_rate, 0, sizeof(dss_clk_rate_t));
-	if (g_dss_version_tag & FB_ACCEL_KIRIN970) {
-		dss_voltage_value_level1 = PERI_VOLTAGE_065V;
-		dss_voltage_value_level2 = PERI_VOLTAGE_075V;
-		dss_voltage_value_level3 = PERI_VOLTAGE_080V;
-	} else {
-		dss_voltage_value_level1 = PERI_VOLTAGE_07V;
-		dss_voltage_value_level2 = PERI_VOLTAGE_08V;
-	}
-
-
-	if ((dss_vol_clk_rate.dss_voltage_value != dss_voltage_value_level1)
-		&& (dss_vol_clk_rate.dss_voltage_value != dss_voltage_value_level2)) {
-		if (g_dss_version_tag & FB_ACCEL_KIRIN970) {
-			if (dss_vol_clk_rate.dss_voltage_value != dss_voltage_value_level3) {
-				HISI_FB_ERR("get dss_voltage_value fail, dss_voltage_value = %d\n", dss_vol_clk_rate.dss_voltage_value);
-				return -EINVAL;
-			}
-		} else {
-			HISI_FB_ERR("get dss_voltage_value fail, dss_voltage_value = %d\n", dss_vol_clk_rate.dss_voltage_value);
-			return -EINVAL;
-		}
-	}
-
-	if (copy_to_user(argp, &dss_vol_clk_rate, sizeof(dss_clk_rate_t))) {
+	memset(&dss_vote_cmd, 0, sizeof(dss_vote_cmd_t));
+	dss_vote_cmd.dss_voltage_level = dpe_get_voltage_level(voltage_value);
+	if (copy_to_user(argp, &dss_vote_cmd, sizeof(dss_vote_cmd_t))) {
 		HISI_FB_ERR("copy to user fail\n");
 		return -EFAULT;
 	}
-
-	HISI_FB_DEBUG("fb%d, dss_voltage_value = %d!\n", hisifd->index, dss_vol_clk_rate.dss_voltage_value);
+	HISI_FB_DEBUG("fb%d, dss_voltage_level = %d!\n", hisifd->index, dss_vote_cmd.dss_voltage_level);
 
 	return 0;
 }
@@ -518,13 +500,12 @@ int hisifb_ctrl_dss_voltage_get(struct fb_info *info, void __user *argp)
 int hisifb_ctrl_dss_voltage_set(struct fb_info *info, void __user *argp)
 {
 	int ret = 0;
+	int voltage_value = 0;
 	bool need_vote_vol = false;
+	bool is_normal_temperature = true;
 	struct hisi_fb_data_type *hisifd;
 	struct hisi_fb_data_type *targetfd = NULL;
-	dss_clk_rate_t dss_vol_clk_rate;
-	uint32_t dss_voltage_value_level1;
-	uint32_t dss_voltage_value_level2;
-	uint32_t dss_voltage_value_level3;
+	dss_vote_cmd_t dss_vote_cmd;
 
 
 	if (NULL == info) {
@@ -555,34 +536,21 @@ int hisifb_ctrl_dss_voltage_set(struct fb_info *info, void __user *argp)
 		}
 	}
 
-	ret = copy_from_user(&dss_vol_clk_rate, argp, sizeof(dss_clk_rate_t));//lint !e509
+	if ((hisifd->index == AUXILIARY_PANEL_IDX) && (!hisifd_list[PRIMARY_PANEL_IDX]->panel_power_on)) {
+		HISI_FB_INFO("fb%d, primary_pane is power off!\n", hisifd->index);
+		return -EINVAL;
+	}
+
+	ret = copy_from_user(&dss_vote_cmd, argp, sizeof(dss_vote_cmd_t));//lint !e509
 	if (ret) {
 		HISI_FB_ERR("copy_from_user failed!ret=%d!\n", ret);
 		return ret;
 	}
-
-	if (g_dss_version_tag & FB_ACCEL_KIRIN970 ) {
-		dss_voltage_value_level1 = PERI_VOLTAGE_065V;
-		dss_voltage_value_level2 = PERI_VOLTAGE_075V;
-		dss_voltage_value_level3 = PERI_VOLTAGE_080V;
-	} else {
-		dss_voltage_value_level1 = PERI_VOLTAGE_07V;
-		dss_voltage_value_level2 = PERI_VOLTAGE_08V;
+	voltage_value = dpe_get_voltage_value(&dss_vote_cmd);
+	if (voltage_value < 0) {
+		HISI_FB_ERR("get votage_value failed!\n");
+		return -EINVAL;
 	}
-
-	if ((dss_vol_clk_rate.dss_voltage_value != dss_voltage_value_level1)
-		&& (dss_vol_clk_rate.dss_voltage_value != dss_voltage_value_level2)) {
-		if (g_dss_version_tag == FB_ACCEL_KIRIN970) {
-			if (dss_vol_clk_rate.dss_voltage_value != dss_voltage_value_level3) {
-				HISI_FB_ERR("dss_voltage_value is err, dss_voltage_value = %d\n", dss_vol_clk_rate.dss_voltage_value);
-				return -EINVAL;
-			}
-		} else {
-			HISI_FB_ERR("dss_voltage_value is err, dss_voltage_value = %d\n", dss_vol_clk_rate.dss_voltage_value);
-			return -EINVAL;
-		}
-	}
-
 
 	if (hisifd->index == PRIMARY_PANEL_IDX) {
 		targetfd = hisifd_list[AUXILIARY_PANEL_IDX];
@@ -591,26 +559,26 @@ int hisifb_ctrl_dss_voltage_set(struct fb_info *info, void __user *argp)
 	}
 
 	if (targetfd) {
-		if (dss_vol_clk_rate.dss_voltage_value >= targetfd->dss_clk_rate.dss_voltage_value) {
+		if ((dss_vote_cmd.dss_voltage_level >= targetfd->dss_vote_cmd.dss_voltage_level)
+			&& (is_normal_temperature)){
 			need_vote_vol = true;
 		}
 	}
 
-	if (copy_to_user(argp, &dss_vol_clk_rate, sizeof(dss_clk_rate_t))) {
+	if (copy_to_user(argp, &dss_vote_cmd, sizeof(dss_vote_cmd_t))) {
 		HISI_FB_ERR("copy to user fail\n");
 		return -EFAULT;
 	}
-
-	HISI_FB_DEBUG("get dss_voltage_value=%d .\n", dss_vol_clk_rate.dss_voltage_value);
+	HISI_FB_DEBUG("get dss_voltage_level = %d.\n", dss_vote_cmd.dss_voltage_level);
 	return ret;
 }
 /*lint +e644 +e540*/
 
-int hisifb_ctrl_dss_clk_rate_set(struct fb_info *info, void __user *argp)
+int hisifb_ctrl_dss_vote_cmd_set(struct fb_info *info, const void __user *argp)
 {
 	int ret = 0;
 	struct hisi_fb_data_type *hisifd;
-	dss_clk_rate_t dss_clk_rate;
+	dss_vote_cmd_t vote_cmd;
 
 	if (NULL == info) {
 		HISI_FB_ERR("dss clk rate set info NULL Pointer!\n");
@@ -635,14 +603,13 @@ int hisifb_ctrl_dss_clk_rate_set(struct fb_info *info, void __user *argp)
 		}
 	}
 
-	ret = copy_from_user(&dss_clk_rate, argp, sizeof(dss_clk_rate_t));
+	ret = copy_from_user(&vote_cmd, argp, sizeof(dss_vote_cmd_t));
 	if (ret) {
 		HISI_FB_ERR("copy_from_user failed!ret=%d.", ret);
 		return ret;
 	}
 
 	down(&hisifd->blank_sem);
-
 	if (hisifd->index != AUXILIARY_PANEL_IDX) {
 		if (!hisifd->panel_power_on) {
 			HISI_FB_DEBUG("fb%d, panel power off!\n", hisifd->index);
@@ -650,7 +617,7 @@ int hisifb_ctrl_dss_clk_rate_set(struct fb_info *info, void __user *argp)
 			goto err_out;
 		}
 	}
-	ret = set_dss_clk_rate(hisifd, dss_clk_rate);
+	ret = set_dss_vote_cmd(hisifd, vote_cmd);
 
 err_out:
 	up(&hisifd->blank_sem);
@@ -1252,6 +1219,39 @@ static ssize_t hisifb_mipi_dsi_bit_clk_upt_store(struct device *dev, struct devi
 
 err_out:
 	up(&hisifd->blank_sem);
+
+	return count;
+}
+
+static ssize_t hisifb_panel_mode_switch_store(struct device *dev, struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+	ssize_t ret = -1;
+	struct fb_info *fbi = NULL;
+	struct hisi_fb_data_type *hisifd = NULL;
+
+	if (NULL == dev) {
+		HISI_FB_ERR("dev NULL Pointer\n");
+		return -1;
+	}
+
+	fbi = dev_get_drvdata(dev);
+	if (NULL == fbi) {
+		HISI_FB_ERR("fbi NULL Pointer\n");
+		return -1;
+	}
+
+	hisifd = (struct hisi_fb_data_type *)fbi->par;
+	if (NULL == hisifd) {
+		HISI_FB_ERR("hisifd NULL Pointer\n");
+		return -1;
+	}
+
+	if (NULL == buf) {
+		HISI_FB_ERR("NULL Pointer\n");
+		return -1;
+	}
+	ret = panel_mode_switch_store(hisifd, buf, count);
 
 	return count;
 }
@@ -2026,7 +2026,7 @@ static ssize_t hisifb_lcd_support_mode_show(struct device *dev,
 		hisifb_deactivate_vsync(hisifd);
 	}
 
-        /** 
+        /**
          * support none if lower lcd_support_mode_show functions have not be returned
          */
         if (0 == ret) {
@@ -2563,6 +2563,212 @@ static ssize_t hisifb_lcd_func_switch_show(struct device *dev,
 }
 
 static u32 xcc_table_def[12] = {0x0, 0x8000, 0x0,0x0,0x0,0x0,0x8000,0x0,0x0,0x0,0x0,0x8000,};
+
+static void hisifb_lcd_func_switch_store_sbl_xcc_support(struct hisi_panel_info *pinfo, const char *command)
+{
+	if (NULL == pinfo) {
+		HISI_FB_ERR("lcd func switch store pinfo NULL Pointer!\n");
+		return;
+	}
+
+	if (NULL == command) {
+		HISI_FB_ERR("lcd func switch store command NULL Pointer!\n");
+		return;
+	}
+
+	if (!strncmp("sbl:", command, strlen("sbl:"))) {
+		if('0' == command[strlen("sbl:")]) {
+			pinfo->sbl_support = 0;
+			HISI_FB_INFO("sbl disable\n");
+		} else {
+			pinfo->sbl_support = 1;
+			HISI_FB_INFO("sbl enable\n");
+		}
+	}
+
+	if (!strncmp("xcc_support:", command, strlen("xcc_support:"))) {
+		if('0' == command[strlen("xcc_support:")]) {
+			pinfo->xcc_support = 0;
+			if(pinfo->xcc_table) {
+				pinfo->xcc_table[1] = 0x8000;
+				pinfo->xcc_table[6] = 0x8000;
+				pinfo->xcc_table[11] = 0x8000;
+			}
+			HISI_FB_INFO("xcc_support disable\n");
+		} else {
+			pinfo->xcc_support = 1;
+			if (pinfo->xcc_table == NULL) {
+				pinfo->xcc_table = xcc_table_def;
+				pinfo->xcc_table_len = ARRAY_SIZE(xcc_table_def);
+			}
+			HISI_FB_INFO("xcc_support enable\n");
+		}
+	}
+}
+
+static void hisifb_lcd_func_switch_store_blpwm(struct hisi_panel_info *pinfo, const char *command)
+{
+	if (NULL == pinfo) {
+		HISI_FB_ERR("lcd func switch store pinfo NULL Pointer!\n");
+		return;
+	}
+
+	if (NULL == command) {
+		HISI_FB_ERR("lcd func switch store command NULL Pointer!\n");
+		return;
+	}
+
+	if (!strncmp("blpwm_input_ena:", command, strlen("blpwm_input_ena:"))) {
+		if('0' == command[strlen("blpwm_input_ena:")]) {
+			pinfo->blpwm_input_ena = 0;
+			HISI_FB_INFO("blpwm_input_ena disable\n");
+		} else {
+			pinfo->blpwm_input_ena = 1;
+			HISI_FB_INFO("blpwm_input_ena enable\n");
+		}
+	}
+
+	if (!strncmp("blpwm_precision_type:", command, strlen("blpwm_precision_type:"))) {
+		if('0' == command[strlen("blpwm_precision_type:")]) {
+			pinfo->blpwm_precision_type = 0;
+			HISI_FB_INFO("blpwm_precision_type default\n");
+		} else {
+			pinfo->blpwm_precision_type = BLPWM_PRECISION_10000_TYPE;
+			HISI_FB_INFO("blpwm_precision_type BLPWM_PRECISION_10000_TYPE\n");
+		}
+	}
+}
+
+static int hisifb_lcd_func_switch_store_lane_nums(struct hisi_fb_data_type *hisifd, struct hisi_panel_info *pinfo, const char *command)
+{
+	if (NULL == pinfo) {
+		HISI_FB_ERR("lcd func switch store pinfo NULL Pointer!\n");
+		return 0;
+	}
+
+	if (NULL == command) {
+		HISI_FB_ERR("lcd func switch store command NULL Pointer!\n");
+		return 0;
+	}
+
+	if (!strncmp("lane_nums:", command, strlen("lane_nums:"))) {
+		if (hisifd->panel_power_on) {
+			HISI_FB_ERR("fb%d, lane_nums can be changed when panel power off, BUT panel power on!\n", hisifd->index);
+			return -1;
+		}
+
+		if(('1' == command[strlen("lane_nums:")]) && (pinfo->mipi.lane_nums_select_support & DSI_1_LANES_SUPPORT)) {
+			pinfo->mipi.lane_nums = DSI_1_LANES;
+			HISI_FB_INFO("lane_nums: DSI_1_LANES\n");
+		} else if (('2' == command[strlen("lane_nums:")]) && (pinfo->mipi.lane_nums_select_support & DSI_2_LANES_SUPPORT)) {
+			pinfo->mipi.lane_nums = DSI_2_LANES;
+			HISI_FB_INFO("lane_nums: DSI_2_LANES\n");
+		} else if (('3' == command[strlen("lane_nums:")]) && (pinfo->mipi.lane_nums_select_support & DSI_3_LANES_SUPPORT)) {
+			pinfo->mipi.lane_nums = DSI_3_LANES;
+			HISI_FB_INFO("lane_nums: DSI_3_LANES\n");
+		} else {
+			pinfo->mipi.lane_nums = DSI_4_LANES;
+			HISI_FB_INFO("lane_nums: DSI_4_LANES\n");
+		}
+	}
+	return 0;
+}
+
+static void hisifb_lcd_func_switch_store_esd_fps(struct hisi_panel_info *pinfo, const char *command)
+{
+	if (NULL == pinfo) {
+		HISI_FB_ERR("lcd func switch store pinfo NULL Pointer!\n");
+		return;
+	}
+
+	if (NULL == command) {
+		HISI_FB_ERR("lcd func switch store command NULL Pointer!\n");
+		return;
+	}
+
+	if (!strncmp("esd_enable:", command, strlen("esd_enable:"))) {
+		if('0' == command[strlen("esd_enable:")]) {
+			pinfo->esd_enable = 0;
+			HISI_FB_INFO("esd_enable disable\n");
+		} else {
+			pinfo->esd_enable = 1;
+			HISI_FB_INFO("esd_enable enable\n");
+		}
+	}
+
+	if (!strncmp("fps_updt_support:", command, strlen("fps_updt_support:"))) {
+		if('0' == command[strlen("fps_updt_support:")]) {
+			pinfo->fps_updt_support = 0;
+			HISI_FB_INFO("fps_updt_support disable\n");
+		} else {
+			pinfo->fps_updt_support = 1;
+			HISI_FB_INFO("fps_updt_support enable\n");
+		}
+	}
+}
+
+static void hisifb_lcd_func_switch_store_lcd_info(struct hisi_panel_info *pinfo, char *command)
+{
+	if (NULL == pinfo) {
+		HISI_FB_ERR("lcd func switch store pinfo NULL Pointer!\n");
+		return;
+	}
+
+	if (NULL == command) {
+		HISI_FB_ERR("lcd func switch store command NULL Pointer!\n");
+		return;
+	}
+
+	if (!strncmp("dsi_bit_clk_upt:", command, strlen("dsi_bit_clk_upt:"))) {
+		if('0' == command[strlen("dsi_bit_clk_upt:")]) {
+			pinfo->dsi_bit_clk_upt_support = 0;
+			HISI_FB_INFO("dsi_bit_clk_upt disable\n");
+		} else {
+			pinfo->dsi_bit_clk_upt_support = 1;
+			HISI_FB_INFO("dsi_bit_clk_upt enable\n");
+		}
+	}
+
+	if (!strncmp("dirty_region_upt:", command, strlen("dirty_region_upt:"))) {
+		if('0' == command[strlen("dirty_region_upt:")]) {
+			g_enable_dirty_region_updt = 0;
+			HISI_FB_INFO("dirty_region_upt disable\n");
+		} else {
+			g_enable_dirty_region_updt = 1;
+			HISI_FB_INFO("dirty_region_upt enable\n");
+		}
+	}
+
+	if (!strncmp("ifbc_type:", command, strlen("ifbc_type:"))) {
+		if ('0' == command[strlen("ifbc_type:")]) {
+			if (pinfo->ifbc_type == IFBC_TYPE_VESA3X_SINGLE) {
+				//ldi
+				pinfo->ldi.h_back_porch *= pinfo->pxl_clk_rate_div;
+				pinfo->ldi.h_front_porch *= pinfo->pxl_clk_rate_div;
+				pinfo->ldi.h_pulse_width *= pinfo->pxl_clk_rate_div;
+
+				pinfo->pxl_clk_rate_div = 1;
+				pinfo->ifbc_type = IFBC_TYPE_NONE;
+				HISI_FB_INFO("ifbc_type changed to IFBC_TYPE_NONE\n");
+			}
+		} else if ('7' == command[strlen("ifbc_type:")]) {
+			if (pinfo->ifbc_type == IFBC_TYPE_NONE) {
+				pinfo->pxl_clk_rate_div = 3;
+
+				//ldi
+				pinfo->ldi.h_back_porch /= pinfo->pxl_clk_rate_div;
+				pinfo->ldi.h_front_porch /= pinfo->pxl_clk_rate_div;
+				pinfo->ldi.h_pulse_width /= pinfo->pxl_clk_rate_div;
+
+				pinfo->ifbc_type = IFBC_TYPE_VESA3X_SINGLE;
+				HISI_FB_INFO("ifbc_type changed to IFBC_TYPE_VESA3X_SINGLE\n");
+			}
+		}
+	}
+
+	hisifb_lcd_func_switch_store_esd_fps(pinfo, command);
+}
+
 static ssize_t hisifb_lcd_func_switch_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -2615,141 +2821,12 @@ static ssize_t hisifb_lcd_func_switch_store(struct device *dev,
 
 	hisifb_activate_vsync(hisifd);
 
-	if (!strncmp("sbl:", command, strlen("sbl:"))) {
-		if('0' == command[strlen("sbl:")]) {
-			pinfo->sbl_support = 0;
-			HISI_FB_INFO("sbl disable\n");
-		} else {
-			pinfo->sbl_support = 1;
-			HISI_FB_INFO("sbl enable\n");
-		}
-	}
+	hisifb_lcd_func_switch_store_sbl_xcc_support(pinfo, command);
+	hisifb_lcd_func_switch_store_lcd_info(pinfo, command);
+	hisifb_lcd_func_switch_store_blpwm(pinfo, command);
 
-	if (!strncmp("xcc_support:", command, strlen("xcc_support:"))) {
-		if('0' == command[strlen("xcc_support:")]) {
-			pinfo->xcc_support = 0;
-			if(pinfo->xcc_table) {
-				pinfo->xcc_table[1] = 0x8000;
-				pinfo->xcc_table[6] = 0x8000;
-				pinfo->xcc_table[11] = 0x8000;
-			}
-			HISI_FB_INFO("xcc_support disable\n");
-		} else {
-			pinfo->xcc_support = 1;
-			if (pinfo->xcc_table == NULL) {
-				pinfo->xcc_table = xcc_table_def;
-				pinfo->xcc_table_len = ARRAY_SIZE(xcc_table_def);
-			}
-			HISI_FB_INFO("xcc_support enable\n");
-		}
-	}
-
-	if (!strncmp("dsi_bit_clk_upt:", command, strlen("dsi_bit_clk_upt:"))) {
-		if('0' == command[strlen("dsi_bit_clk_upt:")]) {
-			pinfo->dsi_bit_clk_upt_support = 0;
-			HISI_FB_INFO("dsi_bit_clk_upt disable\n");
-		} else {
-			pinfo->dsi_bit_clk_upt_support = 1;
-			HISI_FB_INFO("dsi_bit_clk_upt enable\n");
-		}
-	}
-
-	if (!strncmp("dirty_region_upt:", command, strlen("dirty_region_upt:"))) {
-		if('0' == command[strlen("dirty_region_upt:")]) {
-			g_enable_dirty_region_updt = 0;
-			HISI_FB_INFO("dirty_region_upt disable\n");
-		} else {
-			g_enable_dirty_region_updt = 1;
-			HISI_FB_INFO("dirty_region_upt enable\n");
-		}
-	}
-
-	if (!strncmp("ifbc_type:", command, strlen("ifbc_type:"))) {
-		if ('0' == command[strlen("ifbc_type:")]) {
-			if (pinfo->ifbc_type == IFBC_TYPE_VESA3X_SINGLE) {
-				//ldi
-				pinfo->ldi.h_back_porch *= pinfo->pxl_clk_rate_div;
-				pinfo->ldi.h_front_porch *= pinfo->pxl_clk_rate_div;
-				pinfo->ldi.h_pulse_width *= pinfo->pxl_clk_rate_div;
-
-				pinfo->pxl_clk_rate_div = 1;
-				pinfo->ifbc_type = IFBC_TYPE_NONE;
-				HISI_FB_INFO("ifbc_type changed to IFBC_TYPE_NONE\n");
-			}
-		} else if ('7' == command[strlen("ifbc_type:")]) {
-			if (pinfo->ifbc_type == IFBC_TYPE_NONE) {
-				pinfo->pxl_clk_rate_div = 3;
-
-				//ldi
-				pinfo->ldi.h_back_porch /= pinfo->pxl_clk_rate_div;
-				pinfo->ldi.h_front_porch /= pinfo->pxl_clk_rate_div;
-				pinfo->ldi.h_pulse_width /= pinfo->pxl_clk_rate_div;
-
-				pinfo->ifbc_type = IFBC_TYPE_VESA3X_SINGLE;
-				HISI_FB_INFO("ifbc_type changed to IFBC_TYPE_VESA3X_SINGLE\n");
-			}
-		}
-	}
-
-	if (!strncmp("esd_enable:", command, strlen("esd_enable:"))) {
-		if('0' == command[strlen("esd_enable:")]) {
-			pinfo->esd_enable = 0;
-			HISI_FB_INFO("esd_enable disable\n");
-		} else {
-			pinfo->esd_enable = 1;
-			HISI_FB_INFO("esd_enable enable\n");
-		}
-	}
-
-	if (!strncmp("fps_updt_support:", command, strlen("fps_updt_support:"))) {
-		if('0' == command[strlen("fps_updt_support:")]) {
-			pinfo->fps_updt_support = 0;
-			HISI_FB_INFO("fps_updt_support disable\n");
-		} else {
-			pinfo->fps_updt_support = 1;
-			HISI_FB_INFO("fps_updt_support enable\n");
-		}
-	}
-
-	if (!strncmp("blpwm_input_ena:", command, strlen("blpwm_input_ena:"))) {
-		if('0' == command[strlen("blpwm_input_ena:")]) {
-			pinfo->blpwm_input_ena = 0;
-			HISI_FB_INFO("blpwm_input_ena disable\n");
-		} else {
-			pinfo->blpwm_input_ena = 1;
-			HISI_FB_INFO("blpwm_input_ena enable\n");
-		}
-	}
-
-	if (!strncmp("blpwm_precision_type:", command, strlen("blpwm_precision_type:"))) {
-		if('0' == command[strlen("blpwm_precision_type:")]) {
-			pinfo->blpwm_precision_type = 0;
-			HISI_FB_INFO("blpwm_precision_type default\n");
-		} else {
-			pinfo->blpwm_precision_type = BLPWM_PRECISION_10000_TYPE;
-			HISI_FB_INFO("blpwm_precision_type BLPWM_PRECISION_10000_TYPE\n");
-		}
-	}
-
-	if (!strncmp("lane_nums:", command, strlen("lane_nums:"))) {
-		if (hisifd->panel_power_on) {
-			HISI_FB_ERR("fb%d, lane_nums can be changed when panel power off, BUT panel power on!\n", hisifd->index);
-			goto out;
-		}
-
-		if(('1' == command[strlen("lane_nums:")]) && (pinfo->mipi.lane_nums_select_support & DSI_1_LANES_SUPPORT)) {
-			pinfo->mipi.lane_nums = DSI_1_LANES;
-			HISI_FB_INFO("lane_nums: DSI_1_LANES\n");
-		} else if (('2' == command[strlen("lane_nums:")]) && (pinfo->mipi.lane_nums_select_support & DSI_2_LANES_SUPPORT)) {
-			pinfo->mipi.lane_nums = DSI_2_LANES;
-			HISI_FB_INFO("lane_nums: DSI_2_LANES\n");
-		} else if (('3' == command[strlen("lane_nums:")]) && (pinfo->mipi.lane_nums_select_support & DSI_3_LANES_SUPPORT)) {
-			pinfo->mipi.lane_nums = DSI_3_LANES;
-			HISI_FB_INFO("lane_nums: DSI_3_LANES\n");
-		} else {
-			pinfo->mipi.lane_nums = DSI_4_LANES;
-			HISI_FB_INFO("lane_nums: DSI_4_LANES\n");
-		}
+	if (hisifb_lcd_func_switch_store_lane_nums(hisifd, pinfo, command) < 0) {
+		goto out;
 	}
 
 	if (!strncmp("panel_effect_support:", command, strlen("panel_effect_support:"))) {
@@ -3822,7 +3899,7 @@ static ssize_t hisifb_lcd_amoled_vr_mode_show(struct device *dev,
 	down(&hisifd->blank_sem);
 
 	if (!hisifd->panel_power_on) {
-		HISI_FB_ERR("fb%d, panel power off!\n", hisifd->index);
+		HISI_FB_INFO("fb%d, panel power off!\n", hisifd->index);
 		goto err_out;
 	}
 
@@ -4380,7 +4457,7 @@ static ssize_t hisi_alpm_function_store(struct device *dev,
 
 	ret = sscanf(buf, "%u", &hisifd->aod_function);
 	if (!ret) {
-		HISI_FB_ERR("sscanf return invaild:%d\n", ret);
+		HISI_FB_ERR("sscanf return invaild:%zd\n", ret);
 		return -1;
 	}
 
@@ -4491,6 +4568,7 @@ static DEVICE_ATTR(lcd_check_reg, S_IRUGO, hisifb_lcd_check_reg_show, NULL);
 static DEVICE_ATTR(lcd_mipi_detect, S_IRUGO, hisifb_lcd_mipi_detect_show, NULL);
 static DEVICE_ATTR(frame_count, S_IRUGO, hisifb_frame_count_show, NULL);
 static DEVICE_ATTR(mipi_dsi_bit_clk_upt, S_IRUGO|S_IWUSR, hisifb_mipi_dsi_bit_clk_upt_show, hisifb_mipi_dsi_bit_clk_upt_store);
+static DEVICE_ATTR(panel_mode_switch, S_IRUGO|S_IWUSR, NULL, hisifb_panel_mode_switch_store);
 static DEVICE_ATTR(lcd_hkadc, S_IRUGO|S_IWUSR, hisifb_lcd_hkadc_debug_show, hisifb_lcd_hkadc_debug_store);
 static DEVICE_ATTR(lcd_checksum, S_IRUGO|S_IWUSR, hisifb_lcd_gram_check_show, hisifb_lcd_gram_check_store);
 static DEVICE_ATTR(lcd_dynamic_checksum, S_IRUGO|S_IWUSR, hisifb_lcd_dynamic_sram_check_show, hisifb_lcd_dynamic_sram_check_store);
@@ -4534,6 +4612,7 @@ static DEVICE_ATTR(alpm_setting, 0644, NULL, hisi_alpm_setting_store);
 
 void hisifb_sysfs_attrs_add(struct hisi_fb_data_type *hisifd)
 {
+
 	if (NULL == hisifd) {
 		HISI_FB_ERR("hisifd is NULL");
 		return;
@@ -4543,6 +4622,7 @@ void hisifb_sysfs_attrs_add(struct hisi_fb_data_type *hisifd)
 
 	if (hisifd->index == PRIMARY_PANEL_IDX) {
 		if (hisifd->sysfs_attrs_append_fnc) {
+
 			if(!get_lcdkit_support())
 			{
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_frame_update.attr);
@@ -4553,6 +4633,7 @@ void hisifb_sysfs_attrs_add(struct hisi_fb_data_type *hisifd)
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_lcd_mipi_detect.attr);
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_frame_count.attr);
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_mipi_dsi_bit_clk_upt.attr);
+				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_panel_mode_switch.attr);
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_lcd_hkadc.attr);
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_lcd_checksum.attr);
 				hisifd->sysfs_attrs_append_fnc(hisifd, &dev_attr_lcd_dynamic_checksum.attr);
@@ -4598,3 +4679,4 @@ void hisifb_sysfs_attrs_add(struct hisi_fb_data_type *hisifd)
 
 	HISI_FB_DEBUG("fb%d, -.\n", hisifd->index);
 }
+#pragma GCC diagnostic pop

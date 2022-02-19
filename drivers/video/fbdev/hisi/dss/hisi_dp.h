@@ -17,33 +17,30 @@
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
+#include "hisi_dss_ion.h"
+#if CONFIG_DP_ENABLE
 #include <linux/switch.h>
-
+#endif
 #include "dp/drm_dp_helper.h"
 #include "dp/drm_dp_helper_additions.h"
 #include "dp/reg.h"
 #include "dp/dbg.h"
+#include <huawei_platform/dp_source/dp_dsm.h>
+#include <huawei_platform/dp_source/dp_factory.h>
+#include <huawei_platform/dp_source/dp_debug.h>
+#include <drm/drm_fixed.h>
+#include <drm/drm_dp_mst_helper.h>
 
-#ifdef CONFIG_HUAWEI_DSM
-#include <dsm/dsm_pub.h>
-#include <linux/timer.h>
-#include <linux/timex.h>
-#include <linux/rtc.h>
-#endif
+
+#define PARSE_EST_TIMINGS_FROM_BYTE3
+
 
 #define CONFIG_DP_HDCP_ENABLE
 //#define CONFIG_DP_GENERATOR_REF
 #define CONFIG_DP_EDID_DEBUG
 #define CONFIG_DP_SETTING_COMBOPHY 1
 #define DP_TIME_INFO_SIZE		(24)
-#define DP_MONTIOR_NAME_SIZE (10)
-
-#define DP_MANUFACTURER_ID_SIZE          (4) // manufacturer ID
-#define DP_MANUFACTURER_ID_OFFSET        (8) // offset in edid block
-#define DP_MANUFACTURER_ID_LETTER(a, b)  ((a << 8) | b)
-#define DP_MANUFACTURER_ID_LETTER_NUM    (3)
-#define DP_MANUFACTURER_ID_LETTER_OFFSET (5)
-#define DP_MANUFACTURER_ID_LETTER_MASK   (0x1F)
+#define DP_MONTIOR_NAME_SIZE (11)
 
 #define DP_PLUG_TYPE_NORMAL 0
 #define DP_PLUG_TYPE_FLIPPED 1
@@ -55,7 +52,7 @@
 #define DPTX_DEFAULT_EDID_BUFLEN	(128UL)
 
 /* The max rate and lanes supported by the core */
-#define DPTX_MAX_LINK_RATE	DPTX_PHYIF_CTRL_RATE_HBR2
+#define DPTX_MAX_LINK_RATE		DPTX_PHYIF_CTRL_RATE_HBR2
 #define DPTX_MAX_LINK_LANES	(4)
 
 /* The default rate and lanes to use for link training */
@@ -66,28 +63,78 @@
 
 #define DPTX_HDCP_REG_DPK_CRC_ORIG	0x331c1169
 #define DPTX_HDCP_MAX_AUTH_RETRY	10
+#define DPTX_HDCP_MAX_REPEATER_AUTH_RETRY 5
+#define DPTX_COMBOPHY_PARAM_NUM		21
+
 
 #define DPTX_AUX_TIMEOUT	(2000)
 
 #define DEFAULT_AUXCLK_DPCTRL_RATE	16000000UL
 #define DEFAULT_ACLK_DPCTRL_RATE_ES	288000000UL
-#define DEFAULT_ACLK_DPCTRL_RATE_CS	208000000UL
+
+#ifdef CONFIG_HISI_FB_V510
+#define DEFAULT_ACLK_DPCTRL_RATE 207500000UL
+#define DEFAULT_MIDIA_PPLL7_CLOCK_FREQ 1290000000UL
+#define KIRIN_VCO_MIN_FREQ_OUPUT         800000 /*dssv501: 800 * 1000*/
+#define KIRIN_SYS_FREQ   38400 /*dssv501: 38.4 * 1000 */
+#define MIDIA_PPLL7_CTRL0	0x530
+#define MIDIA_PPLL7_CTRL1	0x534
+#define MIDIA_PERI_CTRL4	0x350
+#define TX_VBOOST_ADDR		0x21
+#define PERI_VOLTAGE_060V_CLK 213000000UL
+#define PERI_VOLTAGE_065V_CLK 332000000UL
+#define PERI_VOLTAGE_070V_CLK 415000000UL
+#define PERI_VOLTAGE_080V_CLK 600000000UL
+#define PPLL7_DIV_VOLTAGE_060V 7
+#define PPLL7_DIV_VOLTAGE_065V 4
+#define PPLL7_DIV_VOLTAGE_070V 4
+#define PPLL7_DIV_VOLTAGE_080V 3
+#endif
+
+#ifdef CONFIG_HISI_FB_V501
+#define DEFAULT_ACLK_DPCTRL_RATE 207500000UL
+#define DEFAULT_MIDIA_PPLL7_CLOCK_FREQ 1290000000UL
+#define KIRIN_VCO_MIN_FREQ_OUPUT         800000 /*dssv501: 800 * 1000*/
+#define KIRIN_SYS_FREQ   38400 /*dssv501: 38.4 * 1000 */
+#define MIDIA_PPLL7_CTRL0	0x530
+#define MIDIA_PPLL7_CTRL1	0x534
+#define MIDIA_PERI_CTRL4	0x350
+#define TX_VBOOST_ADDR		0x21
+#define PERI_VOLTAGE_065V_CLK 300000000UL
+#define PERI_VOLTAGE_070V_CLK 415000000UL
+#define PERI_VOLTAGE_080V_CLK 594000000UL
+#define PPLL7_DIV_VOLTAGE_065V 5
+#define PPLL7_DIV_VOLTAGE_070V 4
+#define PPLL7_DIV_VOLTAGE_080V 3
+#endif
+
+#ifdef CONFIG_HISI_FB_970
+#define DEFAULT_ACLK_DPCTRL_RATE	208000000UL
 #define DEFAULT_MIDIA_PPLL7_CLOCK_FREQ	1782000000UL
+#define KIRIN_VCO_MIN_FREQ_OUPUT         1000000 /*Boston: 1000 * 1000*/
+#define KIRIN_SYS_FREQ   19200 /*Boston: 19.2f * 1000 */
+#define MIDIA_PPLL7_CTRL0	0x50c
+#define MIDIA_PPLL7_CTRL1	0x510
+#define MIDIA_PERI_CTRL4	0x350
+#define TX_VBOOST_ADDR		0xf
+#define PERI_VOLTAGE_065V_CLK 255000000UL
+#define PERI_VOLTAGE_070V_CLK 415000000UL
+#define PERI_VOLTAGE_080V_CLK 594000000UL
+#define PPLL7_DIV_VOLTAGE_065V 7
+#define PPLL7_DIV_VOLTAGE_070V 5
+#define PPLL7_DIV_VOLTAGE_080V 3
+#endif
+
 #define DEFAULT_MIDIA_PPLL7_CLOCK_FREQ_SAVEMODE	223000000UL
 
 #define MAX_DIFF_SOURCE_X_SIZE	1920
 
-#define KIRIN970_VCO_MIN_FREQ_OUPUT         1000000 /*Boston: 1000 * 1000*/
-#define KIRIN970_SYS_19M2   19200 /*Boston: 19.2f * 1000 */
 
-#define MIDIA_PPLL7_CTRL0	0x50c
-#define MIDIA_PPLL7_CTRL1	0x510
-#define MIDIA_PERI_CTRL4	0x350
 
 #define MIDIA_PPLL7_FREQ_DEVIDER_MASK	GENMASK(25, 2)
 #define MIDIA_PPLL7_FRAC_MODE_MASK	GENMASK(25, 0)
-#define PMCTRL_PERI_CTRL4_TEMPERATURE_MASK	GENMASK(27, 26)
-#define PMCTRL_PERI_CTRL4_TEMPERATURE_SHIFT	26
+#define PMCTRL_PERI_CTRL4_TEMPERATURE_MASK		GENMASK(27, 26)
+#define PMCTRL_PERI_CTRL4_TEMPERATURE_SHIFT		26
 #define NORMAL_TEMPRATURE 0
 
 #define ACCESS_REGISTER_FN_MAIN_ID_HDCP           0xc500aa01
@@ -95,6 +142,9 @@
 #define ACCESS_REGISTER_FN_SUB_ID_HDCP_INT   (0x55bbccf2)
 
 /* #define DPTX_DEVICE_INFO(pdev) platform_get_drvdata(pdev)->panel_info->dp */
+
+#define DPTX_CHANNEL_NUM_MAX 8
+#define DPTX_DATA_WIDTH_MAX 24
 
 enum dp_tx_hpd_states {
 	HPD_OFF,
@@ -141,6 +191,33 @@ enum video_format_type {
 	VCEA = 0,
 	CVT = 1,
 	DMT = 2
+};
+
+enum established_timings {
+	DMT_640x480_60hz,
+	DMT_800x600_60hz,
+	DMT_1024x768_60hz,
+	NONE
+};
+
+enum iec_samp_freq_value {
+	IEC_SAMP_FREQ_44K = 0,
+	IEC_SAMP_FREQ_48K = 2,
+	IEC_SAMP_FREQ_32K = 3,
+	IEC_SAMP_FREQ_88K = 8,
+	IEC_SAMP_FREQ_96K = 10,
+	IEC_SAMP_FREQ_176K = 12,
+	IEC_SAMP_FREQ_192K = 14,
+};
+
+enum iec_orig_samp_freq_value {
+	IEC_ORIG_SAMP_FREQ_192K = 1,
+	IEC_ORIG_SAMP_FREQ_176K = 3,
+	IEC_ORIG_SAMP_FREQ_96K = 5,
+	IEC_ORIG_SAMP_FREQ_88K = 7,
+	IEC_ORIG_SAMP_FREQ_32K = 12,
+	IEC_ORIG_SAMP_FREQ_48K = 13,
+	IEC_ORIG_SAMP_FREQ_44K = 15,
 };
 
 /**
@@ -206,6 +283,7 @@ struct hdcp_params {
 	uint32_t crc32;
 	uint32_t auth_fail_count;
 	uint32_t hdcp13_is_en;
+	uint32_t hdcp22_is_en;
 };
 
 typedef struct hdcp13_int_params {
@@ -226,6 +304,23 @@ enum _master_hdcp_op_type_ {
 	HDCP_OP_SECURITY_MAX,
 };
 
+enum audio_sample_freq {
+	SAMPLE_FREQ_32 = 0,
+	SAMPLE_FREQ_44_1 = 1,
+	SAMPLE_FREQ_48 = 2,
+	SAMPLE_FREQ_88_2 = 3,
+	SAMPLE_FREQ_96 = 4,
+	SAMPLE_FREQ_176_4 = 5,
+	SAMPLE_FREQ_192 = 6
+};
+
+struct audio_short_desc
+{
+	u8 max_num_of_channels;
+	enum audio_sample_freq max_sampling_freq;
+	u8 max_bit_per_sample;
+};
+
 struct audio_params {
 	uint8_t iec_channel_numcl0;
 	uint8_t iec_channel_numcr0;
@@ -241,9 +336,8 @@ struct audio_params {
 };
 
 struct dtd {
+	uint64_t pixel_clock;
 	uint16_t pixel_repetition_input;
-	int pixel_clock;
-	uint8_t interlaced; /* 1 for interlaced, 0 progressive */
 	uint16_t h_active;
 	uint16_t h_blanking;
 	uint16_t h_image_size;
@@ -256,6 +350,7 @@ struct dtd {
 	uint16_t v_sync_offset;
 	uint16_t v_sync_pulse_width;
 	uint8_t v_sync_polarity;
+	uint8_t interlaced; /* 1 for interlaced, 0 progressive */
 };
 
 struct video_params {
@@ -277,10 +372,12 @@ struct video_params {
 /*edid info*/
 struct timing_info
 {
-	uint8_t vSyncPolarity;
-	uint8_t	hSyncPolarity;
+	struct list_head list_node;
 
-	uint16_t pixelClock;
+	uint8_t vSyncPolarity;
+	uint8_t hSyncPolarity;
+
+	uint64_t pixelClock;
 	uint16_t hActivePixels;
 	uint16_t hBlanking;
 	uint16_t hSyncOffset;
@@ -321,10 +418,10 @@ struct edid_video
 	uint16_t maxHFreq;
 	uint16_t minHFreq;
 	uint16_t maxPixelClock;
-	struct timing_info *TimingInfo;
+
+	struct list_head *dptx_timing_list;
 	struct ext_timing *extTiming;
 	char *dp_monitor_descriptor;
-
 };
 
 struct edid_audio_info
@@ -334,35 +431,6 @@ struct edid_audio_info
 	uint16_t sampling;
 	uint16_t bitrate;
 };
-
-#ifdef CONFIG_HUAWEI_DSM
-typedef union dsm_info_vs_pe
-{
-	uint32_t vswing_preemp;
-	struct {
-		uint8_t vswing:4;
-		uint8_t preemp:4;
-	} vs_pe[4];
-} dsm_info_vs_pe_t;
-
-struct dsm_info
-{
-	char dsm_dp_on_time[DP_TIME_INFO_SIZE];
-	char dsm_link_succ_time[DP_TIME_INFO_SIZE];
-	char dsm_dp_off_time[DP_TIME_INFO_SIZE];
-	char dsm_monitor_info[DP_MONTIOR_NAME_SIZE];
-	char manufacturer_id[DP_MANUFACTURER_ID_SIZE];
-	uint16_t m_width;
-	uint16_t m_high;
-	uint16_t m_fps;
-	uint8_t tu;
-	uint8_t max_rate:4;
-	uint8_t max_lanes:4;
-	uint8_t rate:4;
-	uint8_t lanes:4;
-	dsm_info_vs_pe_t vp;
-};
-#endif
 
 struct edid_audio
 {
@@ -400,9 +468,17 @@ struct edid_information
  * @edid: The sink's EDID.
  * @aux: AUX channel state for performing an AUX transfer.
  * @link: The current link state.
+  * @multipixel: Controls multipixel configuration. 0-Single, 1-Dual, 2-Quad.
  */
 struct dp_ctrl {
 	struct mutex dptx_mutex; /* generic mutex for dptx */
+
+	struct {
+		u8 multipixel;
+		u8 streams;
+		bool gen2phy;
+		bool dsc;
+	} hwparams;
 
 	void __iomem *base;
 	uint32_t irq;
@@ -411,14 +487,31 @@ struct dp_ctrl {
 	uint8_t max_rate;
 	uint8_t max_lanes;
 
+	bool ycbcr420;
+	u8 streams;
+	bool mst;
+
+	bool cr_fail;// harutk need to remove
+
+	u8 multipixel;
+	u8 bstatus;
+
+	bool ssc_en;
+
+	bool dummy_dtds_present;
+	enum established_timings selected_est_timing;
+
 	struct device *dev;
+#if CONFIG_DP_ENABLE
 	struct switch_dev sdev;
 	struct switch_dev dp_switch;
+#endif
 	struct hisi_fb_data_type *hisifd;
 
 	struct video_params vparams;
 	struct audio_params aparams;
 	struct hdcp_params hparams;
+	struct audio_short_desc audio_desc;
 
 	struct edid_information edid_info;
 
@@ -432,6 +525,9 @@ struct dp_ctrl {
 	uint8_t rx_caps[DPTX_RECEIVER_CAP_SIZE];
 
 	uint8_t *edid;
+	uint8_t *edid_second;
+	uint32_t edid_try_count;
+	uint32_t edid_try_delay; // unit: ms
 
 	struct sdp_full_data sdp_list[DPTX_SDP_NUM];
 	struct dptx_aux aux;
@@ -446,14 +542,13 @@ struct dp_ctrl {
 	bool video_transfer_enable;
 
 	uint8_t detect_times;
+	uint8_t current_link_rate;
+	uint8_t current_link_lanes;
 	uint32_t hpd_state;
 	uint32_t user_mode;
-	uint32_t swing2_value;
+	uint32_t combophy_pree_swing[DPTX_COMBOPHY_PARAM_NUM];
 	uint32_t max_edid_timing_hactive;
 	enum video_format_type user_mode_format;
-#ifdef CONFIG_HUAWEI_DSM
-	struct dsm_info m_dsm_info;
-#endif
 	int sysfs_index;
 	struct attribute *sysfs_attrs[DP_SYSFS_ATTRS_NUM];
 	struct attribute_group sysfs_attr_group;
@@ -500,10 +595,5 @@ void dp_send_cable_notification(struct dp_ctrl *dptx, int val);
 struct hisi_fb_data_type;
 int hisi_dp_hpd_register(struct hisi_fb_data_type *hisifd);
 void hisi_dp_hpd_unregister(struct hisi_fb_data_type *hisifd);
-
-#ifdef CONFIG_HUAWEI_DSM
-void dptx_dmd_report(int dmd_num, const char* pszFormat, ...);
-int dptx_get_current_time(char *output);
-#endif
 
 #endif  /* HISI_DP_H */

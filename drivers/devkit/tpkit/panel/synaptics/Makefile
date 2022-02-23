@@ -4,4 +4,4 @@ synaptics_driver-objs += synaptics.o synaptics_fw_update.o synaptics_fw_s3718_up
 EXTRA_CFLAGS += -Iarch/arm/mach-hisi
 EXTRA_CFLAGS += -Idrivers/hisi/tzdriver
 EXTRA_CFLAGS += -Idrivers/tzdriver
-EXTRA_CFLAGS += -Idrivers/devkit/lcdkit/core/common
+EXTRA_CFLAGS += -Idrivers/devkit/lcdkit/lcdkit1.0/core/common

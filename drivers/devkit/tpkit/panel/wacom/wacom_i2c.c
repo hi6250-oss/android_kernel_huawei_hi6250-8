@@ -13,7 +13,7 @@
 #include "wacom.h"
 #include "wac_flash.h"
 #include <linux/ctype.h>
-#include "../../../lcdkit/include/lcdkit_panel.h"
+#include "../../../lcdkit/lcdkit1.0/include/lcdkit_panel.h"
 #include "wac_test.h"
 //dts
 #define WACOM_IRQ_GPIO "attn_gpio"

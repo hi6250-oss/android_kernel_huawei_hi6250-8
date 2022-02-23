@@ -23,7 +23,7 @@
 #include "tui.h"
 #endif
 #include "../../huawei_ts_kit_api.h"
-#include "../../../lcdkit/include/lcdkit_panel.h"
+#include "../../../lcdkit/lcdkit1.0/include/lcdkit_panel.h"
 
 extern volatile int g_ts_kit_lcd_brightness_info;
 extern struct ts_kit_platform_data g_ts_kit_platform_data;

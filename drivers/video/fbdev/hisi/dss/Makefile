@@ -336,7 +336,7 @@ EXTRA_CFLAGS += -Idrivers/video/hisi/dss \
 		-Idrivers/video/hisi \
 		-Iinclude \
 		-Idrivers/staging/android \
-		-Idrivers/devkit/lcdkit/include
+		-Idrivers/devkit/lcdkit/lcdkit1.0/include
 
 ifeq ($(CONFIG_TEE_TUI),y)
 EXTRA_CFLAGS += -Idrivers/hisi/tzdriver

@@ -17,7 +17,7 @@
 #include "elan_ts.h"
 #include "elan_mmi.h"
 #include "../../huawei_ts_kit_api.h"
-#include "../../../lcdkit/include/lcdkit_panel.h"
+#include "../../../lcdkit/lcdkit1.0/include/lcdkit_panel.h"
 
 static int elan_ktf_chip_detect(struct ts_kit_platform_data *platform_data);
 static int elan_ktf_init_chip(void);

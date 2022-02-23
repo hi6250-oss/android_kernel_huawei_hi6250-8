@@ -22,7 +22,7 @@
 #include <huawei_platform/log/hw_log.h>
 #include <linux/wakelock.h>
 #include <linux/semaphore.h>
-#include "../lcdkit/include/lcdkit_ext.h"
+#include "../lcdkit/lcdkit1.0/include/lcdkit_ext.h"
 #define HUAWEI_CHARGER_FB	/*define HUAWEI_CHARGER_FB here to enable charger notify callback*/
 #if defined(HUAWEI_CHARGER_FB)
 //#include <linux/hisi/usb/hisi_usb.h>

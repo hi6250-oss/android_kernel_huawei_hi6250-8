@@ -19,8 +19,8 @@ obj-$(CONFIG_HUAWEI_TS_KIT_COMMON) += huawei_tp_common.o
 obj-$(CONFIG_HUAWEI_TP_KIT_COLOR_INFO) += tp_color.o
 obj-$(CONFIG_HUAWEI_TS_KIT)  += panel/
 obj-$(CONFIG_HUAWEI_HOST_TS_KIT) += hostprocessing/
-EXTRA_CFLAGS += -Idrivers/devkit/lcdkit/core/common
-EXTRA_CFLAGS += -Idrivers/devkit/lcdkit/include
+EXTRA_CFLAGS += -Idrivers/devkit/lcdkit/lcdkit1.0/core/common
+EXTRA_CFLAGS += -Idrivers/devkit/lcdkit/lcdkit1.0/include
 
 ifeq ($(CONFIG_HUAWEI_TS_KIT_TEST),y)
 EXTRA_CFLAGS += -DHUAWEI_TS_KIT_TEST

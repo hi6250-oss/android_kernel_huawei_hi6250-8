@@ -21,7 +21,7 @@
 #include "tui.h"
 #endif
 #include "../../huawei_ts_kit.h"
-#include "../../../lcdkit/include/lcdkit_panel.h"
+#include "../../../lcdkit/lcdkit1.0/include/lcdkit_panel.h"
 
 #define SYNAPTICS_CHIP_INFO  "synaptics-"
 #define SYNAPTICS_VENDER_NAME  "synaptics"

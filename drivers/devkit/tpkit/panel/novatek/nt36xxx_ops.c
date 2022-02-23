@@ -49,7 +49,7 @@
 #endif
 
 #include "nt36xxx.h"
-#include "../../../lcdkit/include/lcdkit_panel.h"
+#include "../../../lcdkit/lcdkit1.0/include/lcdkit_panel.h"
 
 #define NOVATEK_VENDER_NAME  "novatek"
 #define NOVATEK_FW_MANUAL_UPDATE_FILE_NAME	"ts/touch_screen_firmware.bin"

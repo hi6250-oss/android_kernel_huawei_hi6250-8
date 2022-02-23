@@ -22,23 +22,26 @@
 #include <linux/dma-contiguous.h>
 #include <linux/genalloc.h>
 #include <linux/mutex.h>
+#include <linux/of.h>
 #include <linux/of_fdt.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/cma.h>
 #include <linux/sizes.h>
-
+#include <linux/version.h>
 #include <linux/hisi/hisi_cma.h>
 #include <linux/hisi/hisi_ion.h>
 #include <linux/hisi/hisi_drmdriver.h>
 #include <linux/hisi/hisi_mm.h>
-
 #include <asm/tlbflush.h>
 
 #include "ion.h"
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 #include "ion_priv.h"
-
+#else
+#include "hisi_ion_priv.h"
+#endif
 
 #define PER_REGION_HAVE_BITS	(16)
 #define DEVICE_MEMORY PROT_DEVICE_nGnRE
@@ -89,8 +92,11 @@ static int  hisi_sec_cma_set_up(struct reserved_mem *rmem)
 		pr_err("Reserved memory: incorrect alignment of CMA region\n");
 		return -EINVAL;
 	}
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	err = cma_init_reserved_mem(rmem->base, rmem->size, 0, &cma);
+#else
+	err = cma_init_reserved_mem(rmem->base, rmem->size, 0, rmem->name, &cma);
+#endif
 	if (err) {
 		pr_err("Reserved memory: unable to setup CMA region\n");
 		return err;
@@ -167,8 +173,14 @@ static int seccm_create_pool(
 
 	nr = water_mark / per_alloc_sz;
 	while (nr) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 		pg = cma_alloc(seccm_heap->cma, alloc_count,
 			       sz2order(per_bit_sz));
+#else
+		pg = cma_alloc(seccm_heap->cma, alloc_count,
+				   sz2order(per_bit_sz),
+				   GFP_KERNEL);
+#endif
 		if (!pg)
 			break;
 
@@ -195,7 +207,7 @@ static int seccm_create_pool(
 			ion_flush_all_cpus_caches();
 
 			virt = (unsigned long)__va(page_to_phys(pg)); /*lint !e648*/
-			create_mapping_late(page_to_phys(pg),
+			change_secpage_range(page_to_phys(pg),
 					    virt,
 					    per_alloc_sz,
 					    __pgprot(DEVICE_MEMORY));
@@ -207,8 +219,7 @@ static int seccm_create_pool(
 			sec_cfg.bit_map = seccm_heap->bitmap;
 			sec_cfg.sec_port = seccm_heap->attr;
 			hisi_sec_ddr_set(&sec_cfg, (int)seccm_heap->protect_id); /*lint !e64*/
-		}
-		else
+		} else
 			memset(page_address(pg), 0x0, per_alloc_sz); /* unsafe_function_ignore: memset  */
 		nr--;
 	}
@@ -240,9 +251,15 @@ static void seccm_add_pool(struct ion_seccm_heap *seccm_heap)
 
 	nr = water_mark / per_alloc_sz;
 	while (nr) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 		pg = cma_alloc(seccm_heap->cma,
 			       (size_t)(1UL << sz2order(per_alloc_sz)),
 			       sz2order(per_bit_sz));
+#else
+		pg = cma_alloc(seccm_heap->cma,
+			       (size_t)(1UL << sz2order(per_alloc_sz)),
+			       sz2order(per_bit_sz), GFP_KERNEL);
+#endif
 		if (!pg)
 			break;
 
@@ -266,7 +283,7 @@ static void seccm_add_pool(struct ion_seccm_heap *seccm_heap)
 			ion_flush_all_cpus_caches();
 
 			virt = (unsigned long)__va(page_to_phys(pg)); /*lint !e648*/
-			create_mapping_late(page_to_phys(pg),
+			change_secpage_range(page_to_phys(pg),
 					    virt,
 					    per_alloc_sz,
 					    __pgprot(DEVICE_MEMORY));
@@ -277,8 +294,7 @@ static void seccm_add_pool(struct ion_seccm_heap *seccm_heap)
 			sec_cfg.bit_map = seccm_heap->bitmap;
 			sec_cfg.sec_port = seccm_heap->attr;
 			hisi_sec_ddr_set(&sec_cfg, (int)seccm_heap->protect_id); /*lint !e64*/
-		}
-		else
+		} else
 			memset(page_address(pg), 0x0, per_alloc_sz); /* unsafe_function_ignore: memset  */
 		nr--; /*lint !e574*/
 	}
@@ -315,11 +331,13 @@ static void seccm_destroy_pool(struct ion_seccm_heap *seccm_heap)
 		if (seccm_heap->bitmap & (1ULL << shift)) { /*lint !e574*/
 			if (seccm_heap->flag & ION_FLAG_SECURE_BUFFER) {
 				virt = (unsigned long)__va(page_to_phys(pg)); /*lint !e648*/
-				create_mapping_late(page_to_phys(pg),
+				change_secpage_range(page_to_phys(pg),
 						    virt,
 						    per_bit_sz,
-						    __pgprot(PAGE_KERNEL));
+						    PAGE_KERNEL);
+				flush_tlb_all();
 			}
+
 			seccm_heap->bitmap &= ~(1ULL << shift);
 			cma_release(seccm_heap->cma, pg,
 				    (1UL << sz2order(per_bit_sz)));
@@ -335,6 +353,7 @@ static void seccm_destroy_pool(struct ion_seccm_heap *seccm_heap)
 				      per_bit_sz);
 	}
 
+	flush_tlb_all();
 	gen_pool_destroy(seccm_heap->pool);
 	seccm_heap->bitmap = 0;
 	seccm_heap->pool = NULL;
@@ -342,7 +361,7 @@ static void seccm_destroy_pool(struct ion_seccm_heap *seccm_heap)
 	ion_sec_dbg("out %s\n", __func__);
 }
 
-static ion_phys_addr_t seccm_alloc(struct ion_heap *heap,
+static phys_addr_t seccm_alloc(struct ion_heap *heap,
 				   unsigned long size,
 				   unsigned long flag)
 {
@@ -393,7 +412,7 @@ err:
 	return offset; /*lint !e574 */
 }
 
-static void seccm_free(struct ion_heap *heap, ion_phys_addr_t addr,
+static void seccm_free(struct ion_heap *heap, phys_addr_t addr,
 		       unsigned long size)
 {
 	struct ion_seccm_heap *seccm_heap =
@@ -413,19 +432,28 @@ static void seccm_free(struct ion_heap *heap, ion_phys_addr_t addr,
 	ion_sec_dbg("out %s\n", __func__);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 static int ion_seccm_heap_allocate(struct ion_heap *heap,
 				   struct ion_buffer *buffer,
 				   unsigned long size, unsigned long align,
 				   unsigned long flags)
+#else
+static int ion_seccm_heap_allocate(struct ion_heap *heap,
+				   struct ion_buffer *buffer,
+				   unsigned long size,
+				   unsigned long flags)
+#endif
 {
 	struct sg_table *table;
-	ion_phys_addr_t paddr;
+	phys_addr_t paddr;
 	int ret;
 
 	ion_sec_dbg("into %s sz 0x%lx hp id %u\n", __func__, size, heap->id);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	if (align > PAGE_SIZE)
 		return -EINVAL;
+#endif
 
 	if ((heap->id == ION_MISC_HEAP_ID) &&
 	    (flags & ION_FLAG_SECURE_BUFFER)) {
@@ -447,8 +475,7 @@ static int ion_seccm_heap_allocate(struct ion_heap *heap,
 	}
 
 	sg_set_page(table->sgl, pfn_to_page(PFN_DOWN(paddr)), size, 0);
-	buffer->priv_virt = table;
-
+	buffer->sg_table = table;
 	ion_sec_dbg("out %s paddr 0x%lx size 0x%lx heap id %u\n",
 		    __func__, paddr, size, heap->id);
 
@@ -464,9 +491,9 @@ err_free:
 static void ion_seccm_heap_free(struct ion_buffer *buffer)
 {
 	struct ion_heap *heap = buffer->heap;
-	struct sg_table *table = buffer->priv_virt;
+	struct sg_table *table = buffer->sg_table;
 	struct page *page = sg_page(table->sgl);
-	ion_phys_addr_t paddr = PFN_PHYS(page_to_pfn(page));
+	phys_addr_t paddr = PFN_PHYS(page_to_pfn(page));
 
 	ion_sec_dbg("into %s size 0x%lx heap id %u\n", __func__,
 		    buffer->size, heap->id);
@@ -482,32 +509,26 @@ static void ion_seccm_heap_free(struct ion_buffer *buffer)
 		    buffer->size, heap->id);
 }
 
-static int ion_seccm_heap_phys(struct ion_heap *heap,
-			       struct ion_buffer *buffer,
-			       ion_phys_addr_t *addr, size_t *len)
+int ion_secmem_heap_phys(struct ion_heap *heap,
+		struct ion_buffer *buffer,
+		phys_addr_t *addr, size_t *len)
 {
-	struct sg_table *table = buffer->priv_virt;
+	struct sg_table *table = buffer->sg_table;
 	struct page *page = sg_page(table->sgl);
+	phys_addr_t paddr = PFN_PHYS(page_to_pfn(page));
+	if (heap->type != ION_HEAP_TYPE_SECCM) {
+		pr_err("%s: not seccm mem!\n", __func__);
+		return -EINVAL;
+	}
 
-	ion_phys_addr_t paddr = PFN_PHYS(page_to_pfn(page));
 	*addr = paddr;
 	*len = buffer->size;
 
 	return 0;
 }
 
-static struct sg_table *ion_seccm_heap_map_dma(struct ion_heap *heap,
-					       struct ion_buffer *buffer)
-{
-	return buffer->priv_virt;
-}
-
-static void ion_seccm_heap_unmap_dma(struct ion_heap *heap,
-				     struct ion_buffer *buffer)
-{
-}
-
-static int ion_seccm_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
+static int ion_seccm_heap_map_user(struct ion_heap *heap,
+		struct ion_buffer *buffer,
 		      struct vm_area_struct *vma)
 {
 	if (buffer->flags & ION_FLAG_SECURE_BUFFER)
@@ -519,7 +540,7 @@ static void *ion_seccm_heap_map_kernel(struct ion_heap *heap,
 			  struct ion_buffer *buffer)
 {
 	if (buffer->flags & ION_FLAG_SECURE_BUFFER)
-		return 	NULL;
+		return NULL;
 	return ion_heap_map_kernel(heap, buffer);
 }
 
@@ -531,6 +552,7 @@ static void ion_seccm_heap_unmap_kernel(struct ion_heap *heap,
 	ion_heap_unmap_kernel(heap, buffer);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 static int ion_seccm_heap_map_iommu(struct ion_buffer *buffer,
 			struct ion_iommu_map *map_data)
 {
@@ -545,18 +567,18 @@ static void ion_seccm_heap_unmap_iommu(struct ion_iommu_map *map_data)
 		return;
 	ion_heap_unmap_iommu(map_data);
 }
+#endif
 
 static struct ion_heap_ops seccm_heap_ops = {
 	.allocate = ion_seccm_heap_allocate,
 	.free = ion_seccm_heap_free,
-	.phys = ion_seccm_heap_phys,
-	.map_dma = ion_seccm_heap_map_dma,
-	.unmap_dma = ion_seccm_heap_unmap_dma,
 	.map_user = ion_seccm_heap_map_user,
 	.map_kernel = ion_seccm_heap_map_kernel,
 	.unmap_kernel = ion_seccm_heap_unmap_kernel,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	.map_iommu = ion_seccm_heap_map_iommu,
 	.unmap_iommu = ion_seccm_heap_unmap_iommu,
+#endif
 };
 
 struct ion_heap *ion_seccm_heap_create(struct ion_platform_heap *heap_data)
@@ -700,7 +722,7 @@ mutex_err:
 	kfree(seccm_heap);
 	return ERR_PTR(-ENOMEM);
 }
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 void ion_seccm_heap_destroy(struct ion_heap *heap)
 {
 	struct ion_seccm_heap *seccm_heap =
@@ -708,3 +730,4 @@ void ion_seccm_heap_destroy(struct ion_heap *heap)
 
 	kfree(seccm_heap);
 }
+#endif

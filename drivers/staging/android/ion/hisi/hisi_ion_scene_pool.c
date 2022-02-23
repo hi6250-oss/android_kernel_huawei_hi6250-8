@@ -25,7 +25,6 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <linux/hisi/ion-iommu.h>
 #include <linux/sizes.h>
 #include <linux/module.h>
 #include <linux/kthread.h>
@@ -35,6 +34,7 @@
 #ifdef CONFIG_VM_EVENT_COUNTERS
 #include <linux/vmstat.h>
 #endif
+#include <linux/version.h>
 
 #include "ion.h"
 #include "hisi_ion_scene_pool.h"
@@ -59,12 +59,20 @@
 
 #define SCENE_POOL_MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+#if KERNEL_VERSION(4, 9, 0) <= LINUX_VERSION_CODE
+#define __for_each_zone_zonelist_nodemask(zone, z, zlist, highidx, nodemask) \
+        for (z = first_zones_zonelist(zlist, highidx, nodemask), zone = zonelist_zone(z);       \
+                zone;                                                   \
+                z = next_zones_zonelist(++z, highidx, nodemask),        \
+                        zone = zonelist_zone(z))
+#else
 #define __for_each_zone_zonelist_nodemask(zone, z, zlist, highidx, nodemask) \
 	for (z = first_zones_zonelist(zlist, highidx, nodemask, &zone);	\
 	     zone;							\
 	     z++,							\
 	     z = next_zones_zonelist(z, highidx, nodemask),		\
 	     zone = zonelist_zone(z))
+#endif
 
 static unsigned int scene_pool_orders[] = {8, 4, 0};
 
@@ -83,7 +91,8 @@ static void ion_scene_pool_autofree_workfn(struct work_struct *work)
 			(struct ion_scene_pool *)delay_worker_wrapper->pool;
 	int page_cnt = 0, i;
 
-	WARN_ON(!pool);
+	if (!pool)
+		return;
 	if (time_after((pool->start_jiffies + pool->timeout_hz), jiffies)) {
 		queue_delayed_work(system_wq,
 			(struct delayed_work *)(&pool->autofree_delayed_work),
@@ -147,7 +156,7 @@ unsigned long ion_scene_pool_total_size(void)
 	void *pool = ion_get_scene_pool(ion_get_system_heap());
 
 	if (pool) {
-		size = (unsigned)ion_scene_pool_total_pages(pool);
+		size = (unsigned long)ion_scene_pool_total_pages(pool);/*lint !e571 */
 		size <<= PAGE_SHIFT;
 	}
 	return size;
@@ -289,11 +298,19 @@ static int ion_scene_pool_alloc_context_setup(gfp_t gfp_mask,
 	ac->migratetype = gfpflags_to_migratetype(gfp_mask),
 	ac->zonelist = zonelist;
 	/* The preferred zone is used for statistics later */
+#if KERNEL_VERSION(4, 9, 0) <= LINUX_VERSION_CODE
+	if (cpusets_enabled())
+		ac->nodemask = &cpuset_current_mems_allowed;
+
+	preferred_zoneref = first_zones_zonelist(ac->zonelist,
+					ac->high_zoneidx, ac->nodemask);
+#else
 	preferred_zoneref = first_zones_zonelist(
 				ac->zonelist,
 				ac->high_zoneidx,
 				ac->nodemask ? : &cpuset_current_mems_allowed,
 				&ac->preferred_zone);
+#endif
 	if (!preferred_zoneref)
 		return -1;
 	ac->classzone_idx = zonelist_zone_idx(preferred_zoneref);
@@ -314,14 +331,23 @@ static int shrink_memory(gfp_t gfp_mask, unsigned int order,
 	reclaim_state.reclaimed_slab = 0;
 	current->reclaim_state = &reclaim_state;
 
-	progress = try_to_free_pages(ac->zonelist,
+	progress = (int)try_to_free_pages(ac->zonelist,
 				     order, gfp_mask,
 				     ac->nodemask);
 #ifdef CONFIG_VM_EVENT_COUNTERS
 	/* Because we call direct reclaim to shrink memory asynchronousy, */
 	/* so decrease the value in case disturb the counter of allocstall */
+#if KERNEL_VERSION(4, 9, 0) <= LINUX_VERSION_CODE
+{
+	unsigned item = ALLOCSTALL_NORMAL - ZONE_NORMAL
+		+ gfp_zone(memalloc_noio_flags(gfp_mask));
+	if (raw_cpu_read(vm_event_states.event[item]))
+		raw_cpu_dec(vm_event_states.event[item]);
+}
+#else
 	if (this_cpu_read(vm_event_states.event[ALLOCSTALL]))
 		this_cpu_dec(vm_event_states.event[ALLOCSTALL]);
+#endif
 #endif
 	current->reclaim_state = NULL;
 	lockdep_clear_current_reclaim_state();
@@ -350,7 +376,7 @@ static struct page *ion_scene_pool_alloc_page(
 #endif
 	__for_each_zone_zonelist_nodemask(zone, z, zonelist,
 					  ac->high_zoneidx,
-					  ac->nodemask) {
+					  ac->nodemask) { /*lint !e564 */
 		if (cpusets_enabled() &&
 		    (alloc_flags & ALLOC_CPUSET) &&
 		    !cpuset_zone_allowed(zone, alloc_mask))
@@ -420,11 +446,11 @@ static void set_thread_priority_and_cpu(struct task_struct *task,
 		(pool->worker_mask >> SPECIAL_SCENE_WORKER_PRIORITY_SHIFT)
 		& SPECIAL_SCENE_WORKER_PRIORITY_MASK;
 	int nice = PRIO_TO_NICE(priority);
-	long sched_ret;
-
-	WARN_ON(nice < MIN_NICE || nice > MAX_NICE);
-	sched_ret = sched_setaffinity(task->pid, to_cpumask(&cpumask));
-	WARN_ON(sched_ret < 0);
+	long sched_ret = sched_setaffinity(task->pid, to_cpumask(&cpumask));
+	if (sched_ret < 0)
+		pr_info("set_thread_priority_and_cpu ret %ld\n", sched_ret);
+	if (nice < MIN_NICE || nice > MAX_NICE)
+		return;
 	set_user_nice(task, nice);
 }
 
@@ -438,7 +464,7 @@ static bool has_enough_free_memory(struct ion_scene_pool *pool)
 	struct zone *zone = NULL;
 
 	__for_each_zone_zonelist_nodemask(zone, z, zonelist,
-					  ac->high_zoneidx, ac->nodemask) {
+					  ac->high_zoneidx, ac->nodemask) { /*lint !e564*/
 		nr_zone_free = zone_page_state(zone, NR_FREE_PAGES);
 		nr_cannt_used = zone->watermark[ALLOC_WMARK_HIGH];
 #ifdef CONFIG_CMA
@@ -459,7 +485,7 @@ static bool has_enough_free_memory(struct ion_scene_pool *pool)
 		nr_free_pages += nr_zone_free;
 	}
 	if (nr_free_pages > atomic_read(&pool->total_watermark)) {
-		pr_info("There are enough free memory! free=%lu, need=%lu\n",
+		pr_info("There are enough free memory! free=%lu, need=%d\n",
 			nr_free_pages, atomic_read(&pool->total_watermark));
 		ret = true;
 	}
@@ -661,8 +687,8 @@ void ion_scene_pool_wakeup_process(
 		if (scene_pool->in_special_scene) {
 			scene_pool->pool_wait_flag = flag;
 			atomic_set(&scene_pool->scene_pool_can_fill_flag, 1);
-			set_thread_priority_and_cpu(scene_pool->pool_thread,
-						    scene_pool);
+			if (NULL != scene_pool->pool_thread)
+				set_thread_priority_and_cpu(scene_pool->pool_thread, scene_pool);
 		} else {
 			scene_pool->pool_wait_flag = F_FORCE_STOP;
 		}
@@ -670,8 +696,8 @@ void ion_scene_pool_wakeup_process(
 	if (scene_pool->worker_mask & SPECIAL_SCENE_SHRINK_MEMORY_WORKER) {
 		if (scene_pool->in_special_scene) {
 			scene_pool->shrink_wait_flag = flag;
-			set_thread_priority_and_cpu(scene_pool->shrink_thread,
-						    scene_pool);
+			if (NULL != scene_pool->shrink_thread)
+				set_thread_priority_and_cpu(scene_pool->shrink_thread, scene_pool);
 		} else {
 			scene_pool->shrink_wait_flag = F_FORCE_STOP;
 		}
@@ -755,7 +781,11 @@ struct ion_scene_pool *ion_scene_pool_create(void)
 		return NULL;
 	}
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0))
 	if (ion_system_heap_create_pools(scene_pool->pools, false))
+#else
+	if (ion_system_heap_create_pools(scene_pool->pools, false, false))
+#endif
 		goto free_heap;
 
 	init_waitqueue_head(&scene_pool->pool_wait);

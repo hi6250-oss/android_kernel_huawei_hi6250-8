@@ -143,6 +143,7 @@ void hisi_dss_resync_timeline(struct hisi_dss_timeline *tl);
 
 #else
 
+/*
 #define hisi_dss_timeline sw_sync_timeline
 
 struct hisi_dss_timeline *hisi_dss_create_timeline(const char *name)
@@ -168,7 +169,7 @@ int hisi_dss_inc_timeline(struct hisi_dss_timeline *tl, int increment)
 
 	return rc;
 }
-
+*/
 #endif
 
 #endif

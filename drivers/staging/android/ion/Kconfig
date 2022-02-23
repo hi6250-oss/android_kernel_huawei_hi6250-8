@@ -35,37 +35,29 @@ config ION_TEGRA
 
 config ION_POOL_CACHE_POLICY
 	bool "Ion set page pool cache policy"
-	depends on ION && X86
+	depends on ION
 	default y if X86
 	help
 	  Choose this option if need to explicity set cache policy of the
 	  pages in the page pool.
 
 config ION_HISI
-	tristate "Hisilicon ION driver"
+	tristate "Ion for Hisilicon"
 	depends on ION
+	select ION_OF
 	help
-	  Choose this option if you wish to use ion on an HISI target.
+	  Choose this option if you wish to use ion on Hisilicon Platform.
 
-config ION_HISI_CPUDRAW
-	bool "Hisilicon ION cpudraw heap support"
-	depends on ION_HISI
+config ION_OF
+	bool "Devicetree support for Ion"
+	depends on ION && OF_ADDRESS
 	help
-	  If you want to use cpu draw the first graph layer on hisilicon
-	  platfrom, you should select this.But now this is usually used
-	  for debug.
+	  Provides base support for defining Ion heaps in devicetree
+	  and setting them up. Also includes functions for platforms
+	  to parse the devicetree and expand for their own custom
+	  extensions
 
-config ION_HISI_SECCM
-	bool "Hisilicon ION seccm heap support"
-	depends on ION_HISI
-	help
-	 if you want to use seccm heap, you should select this.
-
-config ION_HISI_SECSG
-	bool "Hisilicon ION secsg heap support"
-	depends on ION_HISI
-	help
-	 if you want to use secsg heap, you should select this.
+	  If using Ion and devicetree, you should say Y here
 
 config HISI_ION_SECSG_DEBUG
 	bool "Hisilicon ION secsg heap support"
@@ -74,25 +66,29 @@ config HISI_ION_SECSG_DEBUG
 	help
 	  if you want to debug ion secsg, you should select this.
 
+config ION_HISI_SECSG
+	bool "Hisilicon ION secsg heap support"
+	depends on ION_HISI
+	help
+	 if you want to use secsg heap, you should select this.
+
+
 config ION_HISI_DMA_POOL
 	bool "Hisilicon ION DMA pool heap support"
 	depends on ION_HISI
 	help
 	  if you want to use DMA pool heap, you should select this.
 
-config ION_HISI_FAMA_MISC
-	bool "Hisilicon ION fama misc heap support"
+config ION_HISI_SECCM
+	bool "Hisilicon ION seccm heap support"
 	depends on ION_HISI
 	help
-	 if you want to use fama misc heap, you should select this.
+	 if you want to use seccm heap, you should select this.
 
-config ION_HISI_SUPPORT_4GPLUS
+config ALLOC_MEM_SUPPORT_4GPLUS
 	bool "Hisilicon ION can support allocation above 4G"
 	depends on ION
 	default n
-	help
-	  If the media IP can access the memory which is above 4G.
-	  you should select this.
 
 config HISI_SMARTPOOL_OPT
 	bool "Support Hisilicon Smartpool"

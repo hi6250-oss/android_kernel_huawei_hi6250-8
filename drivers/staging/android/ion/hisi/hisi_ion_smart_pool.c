@@ -1,7 +1,5 @@
-
 /*
- *
- * Copyright (C) 2016 hisilicon, Inc.
+ * Copyright (C) 2016-2017. Hisilicon Tech. Co., Ltd. All Rights Reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -25,11 +23,11 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <linux/hisi/ion-iommu.h>
 #include <linux/sizes.h>
 #include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/kernel.h>
+#include <linux/version.h>
 
 #include "ion.h"
 #include "hisi_ion_smart_pool.h"
@@ -250,6 +248,12 @@ int ion_smart_pool_free(struct ion_smart_pool *pool, struct page *page)
 
 	order = compound_order(page);
 
+	if (!((order == smart_pool_orders[0]) || (order == smart_pool_orders[1])
+		|| (order == smart_pool_orders[2]))) {
+		pr_err("%s: order:%d is error!\n", __func__, order);
+		return -1;
+	}
+
 	if (sp_pool_total_pages(pool) < MAX_POOL_SIZE) {
 		ion_smart_sp_init_page(page);
 		ion_page_pool_free(pool->pools[sp_order_to_index(order)], page);
@@ -311,8 +315,13 @@ struct ion_smart_pool *ion_smart_pool_create(void)
 		return NULL;
 	}
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0))
 	if (ion_system_heap_create_pools(smart_pool->pools,
 				graphic_buffer_flag))
+#else
+	if (ion_system_heap_create_pools(smart_pool->pools,
+				false, graphic_buffer_flag))
+#endif
 		goto free_heap;
 
 	init_waitqueue_head(&smart_pool_wait);

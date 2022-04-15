@@ -11,4 +11,4 @@ KBUILD_CPPFLAGS +=	-Idrivers/hisi/modem/drv/om/common \
 
 obj-$(CONFIG_HW_IP_BASE_ADDR)	+= hwadp_balong.o hwadp_core.o hwadp_debug.o
 
-subdir-ccflags-y := -Werror
+subdir-ccflags-y :=

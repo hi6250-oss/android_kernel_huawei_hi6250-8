@@ -1,4 +1,4 @@
-subdir-ccflags-y += -Wall -Werror
+subdir-ccflags-y += -Wall
 
 ifeq ($(CLT_IV),true)
 EXTRA_CFLAGS += -DCLT_VOICE

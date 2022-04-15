@@ -1,4 +1,4 @@
-subdir-ccflags-y += -Wall -Werror
+subdir-ccflags-y += -Wall
 
 EXTRA_CFLAGS += -Idrivers/hisi/hi64xx_dsp/
 EXTRA_CFLAGS += -Idrivers/hisi/soundtrigger/

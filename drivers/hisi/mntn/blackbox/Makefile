@@ -1,4 +1,4 @@
-ccflags-y += -Wall -Werror
+ccflags-y += -Wall
 
 obj-$(CONFIG_HISI_BB) += rdr_core.o
 obj-$(CONFIG_HISI_BB) += rdr_common.o

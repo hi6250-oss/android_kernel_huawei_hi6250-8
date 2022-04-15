@@ -1233,7 +1233,7 @@ int rt1711h_get_cc_mode(void)
 {
 	if (!g_chip_for_reg_read || !g_chip_for_reg_read->tcpc) {
 			hwlog_info("g_chip_for_reg_read or tcpc is NULL!\n");
-			return;
+			return -1;
 	}
 
 	struct tcpc_device *tcpc_dev = g_chip_for_reg_read->tcpc;

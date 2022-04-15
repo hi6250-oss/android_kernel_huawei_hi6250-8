@@ -1825,7 +1825,7 @@ static void parade_hw_reset(void)
 	msleep(2);
 	parade_reset_pin_high();
 	msleep(CY_HID_RESUME_STARTUP_TIMEOUT);
-	return NO_ERR;
+	return;
 }
 
 static inline void debug_print_i2c_transfer(bool action, u8 addr, u8 *buf, int size)
@@ -3862,7 +3862,7 @@ static void parade_status_resume_work_fn(struct work_struct *work)
 	}
 out:
 	mutex_unlock(&tskit_parade_data->parade_chip_data->device_call_lock);
-	return retval;
+	return;
 }
 
 static void parade_shutdown(void)

@@ -1594,7 +1594,7 @@ void ts_special_hardware_test_switch(struct ts_cmd_node* in_cmd, struct ts_cmd_n
 
 	if (!info) {
 		TS_LOG_ERR("%s, find a null pointer\n", __func__);
-		return -EINVAL;
+		return;
 	}
     TS_LOG_INFO("%s, action :%d, value:%d\n", __func__, info->op_action, info->switch_value);
     if (dev->ops->chip_special_hardware_test_swtich)

@@ -1382,7 +1382,7 @@ void novatek_kit_parse_specific_dts(struct ts_kit_device_data *chip_data)
 			if (*(nvt_ts->NvtTddi_X_Channel) > U8_MAX || *(nvt_ts->NvtTddi_X_Channel) < U8_MIN ||
 				*(nvt_ts->NvtTddi_Y_Channel) > U8_MAX || *(nvt_ts->NvtTddi_Y_Channel) < U8_MIN) {
 				TS_LOG_ERR("%s: data conversion failed!\n", __func__);
-				return -EINVAL;
+				return;
 			}else {
 				x_channel_size = (uint8_t)*(nvt_ts->NvtTddi_X_Channel);
 				y_channel_size = (uint8_t)*(nvt_ts->NvtTddi_Y_Channel);

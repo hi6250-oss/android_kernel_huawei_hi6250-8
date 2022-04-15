@@ -2897,7 +2897,7 @@ void focal_prase_threshold_for_csv(const char *project_id,
 	ret = ts_kit_parse_csvfile(file_path, FTS_CB_TEST_CSV, data_buf, 1, 2);
 	if (ret) {
 		TS_LOG_INFO("%s: Failed get %s \n", __func__, FTS_CB_TEST_CSV);
-		return ret;
+		return;
 	}
 	threshold->cb_test_min = data_buf[0];
 	threshold->cb_test_max = data_buf[1];
@@ -2906,7 +2906,7 @@ void focal_prase_threshold_for_csv(const char *project_id,
 	ret = ts_kit_parse_csvfile(file_path, FTS_SCAP_RAW_FATA_CSV, data_buf, 1, 2);
 	if (ret) {
 		TS_LOG_INFO("%s: Failed get %s \n", __func__, FTS_SCAP_RAW_FATA_CSV);
-		return ret;
+		return;
 	}
 	threshold->scap_raw_data_min = data_buf[0];
 	threshold->scap_raw_data_max = data_buf[1];
@@ -2915,7 +2915,7 @@ void focal_prase_threshold_for_csv(const char *project_id,
 	ret = ts_kit_parse_csvfile(file_path, DTS_SHORT_CIRCUIT_RES_MIN, data_buf, 1, 1);
 	if (ret) {
 		TS_LOG_INFO("%s: Failed get %s \n", __func__, DTS_SHORT_CIRCUIT_RES_MIN);
-		return ret;
+		return;
 	}
 	threshold->short_circuit_min = data_buf[0];
 
@@ -2927,13 +2927,13 @@ void focal_prase_threshold_for_csv(const char *project_id,
 					params->channel_y_num*2 , params->channel_x_num);
 		if (ret) {
 			TS_LOG_INFO("%s: Failed get %s \n", __func__, DTS_ROW_COLUMN_DELTA_MAX_ARRAY);
-			return ret;
+			return;
 		}
 	} else {
 		ret = ts_kit_parse_csvfile(file_path, DTS_ROW_COLUMN_DELTA_TEST, data_buf, 1, 1);
 		if (ret) {
 			TS_LOG_INFO("%s: Failed get %s \n", __func__, DTS_ROW_COLUMN_DELTA_TEST);
-			return ret;
+			return;
 		}
 		threshold->row_column_delta_max = data_buf[0];
 	}
@@ -2942,7 +2942,7 @@ void focal_prase_threshold_for_csv(const char *project_id,
 	ret = ts_kit_parse_csvfile(file_path, DTS_LCD_NOISE_MAX, data_buf, 1, 1);
 	if (ret) {
 		TS_LOG_INFO("%s: Failed get %s \n", __func__, DTS_LCD_NOISE_MAX);
-		return ret;
+		return;
 	}
 	threshold->lcd_noise_max = data_buf[0];
 
@@ -2950,9 +2950,9 @@ void focal_prase_threshold_for_csv(const char *project_id,
 			params->channel_y_num, params->channel_x_num);
 	if (ret) {
 		TS_LOG_INFO("%s: Failed get %s \n", __func__, DTS_RAW_DATA_MIN_ARRAY);
-		ret = 0;	
+		ret = 0;
 	}
-	
+
 	ret = ts_kit_parse_csvfile(file_path, DTS_RAW_DATA_MAX_ARRAY, threshold->raw_data_max_array,
 			params->channel_y_num, params->channel_x_num);
 	if (ret) {

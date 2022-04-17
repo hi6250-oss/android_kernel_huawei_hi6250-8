@@ -381,6 +381,7 @@ extern bool osl_pcie_linkdown(osl_t *osh);
 #ifdef CONFIG_DHD_USE_STATIC_BUF
 #define	PKTGET_STATIC(osh, len, send)		osl_pktget_static((osh), (len))
 #define	PKTFREE_STATIC(osh, skb, send)		osl_pktfree_static((osh), (skb), (send))
+#define PKTFREE_ALL_STATIC(osh)                 osl_pktfree_all_static(osh)
 #else
 #define	PKTGET_STATIC	PKTGET
 #define	PKTFREE_STATIC	PKTFREE
@@ -852,6 +853,7 @@ extern void osl_pktfree(osl_t *osh, void *skb, bool send);
 extern void *osl_pktget_static(osl_t *osh, uint len);
 extern void osl_pktfree_static(osl_t *osh, void *skb, bool send);
 extern void osl_pktclone(osl_t *osh, void **pkt);
+extern void osl_pktfree_all_static(osl_t *osh);
 
 #ifdef BCMDBG_CTRACE
 #define PKT_CTRACE_DUMP(osh, b)	osl_ctrace_dump((osh), (b))

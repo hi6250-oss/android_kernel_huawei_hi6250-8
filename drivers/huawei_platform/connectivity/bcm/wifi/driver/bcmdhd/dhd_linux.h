@@ -131,5 +131,8 @@ extern int wifi_platform_get_nvram_path(wifi_adapter_info_t *adapter, unsigned c
 extern int wifi_platform_get_fw_path(wifi_adapter_info_t *adapter, unsigned char *buf, int len);
 extern int wifi_platform_get_chip_type(wifi_adapter_info_t *adapter, unsigned char *buf, int len);
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+extern int wifi_platform_get_bcn_timeout(wifi_adapter_info_t *adapter, int def_val);
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
 
 #endif /* __DHD_LINUX_H__ */

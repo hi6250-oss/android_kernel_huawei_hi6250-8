@@ -189,7 +189,7 @@ bool dhd_is_legacy_pno_enabled(dhd_pub_t *dhd)
 #ifdef GSCAN_SUPPORT
 static uint64 convert_fw_rel_time_to_systime(struct timespec *ts, uint32 fw_ts_ms)
 {
-	return ((uint64)(TIMESPEC_TO_US(*ts)) - (uint64)(fw_ts_ms * 1000));
+	return ((uint64)(TIMESPEC_TO_US(*ts)) - ((uint64)(fw_ts_ms) * 1000));
 }
 #ifdef BCM_PATCH_GSCAN
 static void

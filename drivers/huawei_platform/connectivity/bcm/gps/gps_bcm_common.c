@@ -23,10 +23,12 @@
 #define STR_BCM_TYPE_4752 "bcm4752"
 #define STR_BCM_TYPE_47531 "bcm47531"
 #define STR_BCM_TYPE_4774 "bcm4774"
+#define STR_BCM_TYPE_4775 "bcm4775"
 
 #define GPS_IC_TYPE_4752 4752
 #define GPS_IC_TYPE_47531 47531
 #define GPS_IC_TYPE_4774 4774
+#define GPS_IC_TYPE_4775 4775
 
 #define GPS_REFCLK_SEL_ENABLE 1
 #define GPS_REFCLK_SEL_DISABLE 0
@@ -91,6 +93,10 @@ static int __init gps_bcm_common_init(void)
 		   strncmp(STR_BCM_TYPE_4774, gps_ic_type_str,
 			   sizeof(STR_BCM_TYPE_4774))) {
 		gps_ic_type = GPS_IC_TYPE_4774;
+	} else if (0 ==
+		   strncmp(STR_BCM_TYPE_4775, gps_ic_type_str,
+			   sizeof(STR_BCM_TYPE_4775))) {
+		gps_ic_type = GPS_IC_TYPE_4775;
 	} else {
 		pr_err("get broadcom_config,get ic type error\n");
 		gps_ic_type = -1;

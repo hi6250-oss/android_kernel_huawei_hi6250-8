@@ -385,7 +385,11 @@ static int bluetooth_power_probe(struct platform_device *pdev)
 #endif
 	const char *clk_name = NULL;
 	int ret = 0;
-
+#if !defined(CONFIG_BCM4343)
+	/* udp board doesn't have vio */
+	int no_vio_switch = 0;
+	int vio_enable = 0;
+#endif
 	bt_data =
 	    devm_kzalloc(bluetooth_power_dev, sizeof(struct bluepower_data),
 			 GFP_KERNEL);
@@ -471,9 +475,6 @@ static int bluetooth_power_probe(struct platform_device *pdev)
 		goto err_free_bt_en;
 	}
 #if !defined(CONFIG_BCM4343)
-	/* udp board doesn't have vio */
-	int no_vio_switch = 0;
-	int vio_enable = 0;
 
 	of_property_read_u32(np, "huawei,no_vio_switch", &no_vio_switch);
 	pr_info("%s: no_vio_switch value is %d\n", __func__, no_vio_switch);

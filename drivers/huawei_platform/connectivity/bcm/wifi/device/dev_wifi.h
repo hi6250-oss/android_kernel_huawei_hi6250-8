@@ -25,6 +25,23 @@
 
 
 #ifdef CONFIG_DHD_USE_STATIC_BUF
+#define NV_NAME_LENGTH 8     /*NV name maximum length*/
+#define NVE_NV_DATA_SIZE 104 /*NV data maximum length*/
+
+#define NV_WRITE 0 /*NV write operation*/
+#define NV_READ 1  /*NV read  operation*/
+
+
+struct bcm_nve_info_user {
+	uint32_t nv_operation;
+	uint32_t nv_number;
+	char nv_name[NV_NAME_LENGTH];
+	uint32_t valid_size;
+	u_char nv_data[NVE_NV_DATA_SIZE];
+};
+
+
+
 
 typedef struct wifi_mem_prealloc_struct {
     void *mem_ptr;
@@ -138,6 +155,9 @@ struct wifi_host_s {
 	char fw_path[FW_PATH_LEN];
 	char chip_type[CHIP_NAME_LEN];
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+	int bcn_timeout;
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
 	unsigned char macAddr[WLAN_MAC_LEN];
 };
 
@@ -175,6 +195,9 @@ struct UT_TEST {
 	int (*bcm_wifi_get_fw_path)(char *, int );
     int (*bcm_wifi_get_chip_type)(char *, int );	
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+	int (*bcm_wifi_get_bcn_timeout)(void);
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
 	int (*wifi_power_init)(void);
 	int (*bcm_wifi_reset)(int);
 };

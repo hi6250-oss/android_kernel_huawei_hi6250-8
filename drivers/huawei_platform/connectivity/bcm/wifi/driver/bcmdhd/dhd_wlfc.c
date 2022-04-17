@@ -1538,7 +1538,7 @@ _dhd_wlfc_cleanup_txq(dhd_pub_t *dhd, f_processpkt_t fn, void *arg)
 
 		if (!WLFC_GET_AFQ(dhd->wlfc_mode) &&
 			!_dhd_wlfc_hanger_remove_reference(h, pkt)) {
-			DHD_ERROR(("%s: can't find pkt(%p) in hanger, free it anyway\n",
+			DHD_ERROR(("%s: can't find pkt(%pK) in hanger, free it anyway\n",
 				__FUNCTION__, pkt));
 		}
 		entry->transit_count--;
@@ -1744,7 +1744,7 @@ static int _dhd_wlfc_return_credit(athost_wl_status_info_t* ctx, int lender_ac, 
 {
 	if ((ctx == NULL) || (lender_ac < 0) || (lender_ac > AC_COUNT) ||
 		(borrower_ac < 0) || (borrower_ac > AC_COUNT)) {
-		DHD_ERROR(("Error: %s():%d, ctx(%p), lender_ac(%d), borrower_ac(%d)\n",
+		DHD_ERROR(("Error: %s():%d, ctx(%pK), lender_ac(%d), borrower_ac(%d)\n",
 			__FUNCTION__, __LINE__, ctx, lender_ac, borrower_ac));
 
 		return BCME_BADARG;

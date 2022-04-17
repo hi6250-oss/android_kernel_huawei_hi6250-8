@@ -1,5 +1,6 @@
-#ifndef _DRIVER_REGISTER.H
-#define _DRIVER_REGISTER.H
+
+#ifndef _DRIVER_REGISTER_H
+#define _DRIVER_REGISTER_H
 
 extern int dhd_msg_level;
 extern bool g_abs_enabled;

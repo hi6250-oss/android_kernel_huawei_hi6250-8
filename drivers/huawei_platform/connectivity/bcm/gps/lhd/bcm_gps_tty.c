@@ -40,11 +40,15 @@
 #ifdef CONFIG_HWCONNECTIVITY
 #include <huawei_platform/connectivity/hw_connectivity.h>
 #endif
+
+extern int get_gps_ic_type(void);
+
 #define DTS_COMP_GPS_POWER_NAME "huawei,gps_power"
 #define BUFFER_SIZE 16
 #define PORT_NAME "/dev/ttyAMA3"
-#define SIZE_MAX      (18446744073709551615UL)
+#define TTY_SIZE_MAX      (18446744073709551615UL)
 #define USE_TIMER 1
+#define GPS_IC_TYPE_4775 4775
 //#define BCM_TTY_DEBUG_INFO 0
 //#define BCM_TTY_DEBUG 0
 /*
@@ -52,9 +56,13 @@ From EMUI4.1 to  EMUI 5.0 , the GpioDelayMs is changed from 50ms to 250ms,
 so bcm suggest change the delay time from 400ms to 600 ms.
 */
 //#define BCM_TTY_DELTA_MS_TO_TOGGLE_LOW 400
-#define BCM_TTY_DELTA_MS_TO_TOGGLE_LOW 600
-#define BCM_TTY_TIMER_IDLE_INTERVAL_MS 200
+// KOM -- #define BCM_TTY_DELTA_MS_TO_TOGGLE_LOW 600
+#define BCM_TTY_DELTA_MS_TO_TOGGLE_LOW 100
+// KOM -- #define BCM_TTY_TIMER_IDLE_INTERVAL_MS 200
+#define BCM_TTY_TIMER_IDLE_INTERVAL_MS 25
 //#define BCM_TTY_MCU_REQ_RESP 1
+int g_BCM_TTY_DELTA_MS_TO_TOGGLE_LOW = 600;
+int g_BCM_TTY_TIMER_IDLE_INTERVAL_MS = 200;
 
 #define GPSINFO(fmt, args...)	pr_info("[DRV_GPS, I %s:%d]" fmt "\n",  __func__,  __LINE__, ## args)
 #define GPSDBG(fmt, args...)	pr_debug("[DRV_GPS, D %s:%d]" fmt "\n",  __func__,  __LINE__, ## args)
@@ -74,7 +82,7 @@ struct bcm_tty_priv
 	struct file *tty;
 	struct miscdevice misc;
 	int mcu_req;
-	int mcu_resp;
+	//int mcu_resp;
 	//int host_req;
 };
 
@@ -112,8 +120,15 @@ struct bcm_tty_priv *priv;
  * bcm4773_hello - wakeup chip by toggling mcu_req while monitoring mcu_resp to check if awake
  *
  */
+typedef struct platform_device gps_tty_platform_device;
+
 static bool bcm477x_hello(struct bcm_tty_priv *priv, unsigned total_bytes_in_queue, unsigned total_write_request)
 {
+	if(priv == NULL)
+	{
+		GPSERR(" priv is NOT init ");
+		return false;
+	}
 #ifdef BCM_TTY_DEBUG
 	GPSINFO("[SSPBBD]gpstty driver bcm477x_hello is coming %d total_bytes_in_queue=%d total_write_request=%d", priv->mcu_req, total_bytes_in_queue, total_write_request);
 #endif
@@ -156,6 +171,11 @@ static bool bcm477x_hello(struct bcm_tty_priv *priv, unsigned total_bytes_in_que
  */
 static void bcm477x_bye(struct bcm_tty_priv *priv)
 {
+	if(priv == NULL)
+	{
+		GPSERR(" priv is NOT init ");
+		return;
+	}
 #ifdef BCM_TTY_DEBUG
 	GPSINFO("[SSPBBD]gpstty driver bcm477x_bye is coming");
 #endif
@@ -204,16 +224,18 @@ void timer_idle_callback( unsigned long data )
 	delta_ms = base->delta_since_last_write_jiffies * 1000 / HZ;   /* jiffies to milliseconds */
 
 	// if delta_since_last_write_jiffies >= BCM_TTY_DELTA_MS_TO_TOGGLE_LOW then we toggle MCU_REQ low
-	if (delta_ms >= BCM_TTY_DELTA_MS_TO_TOGGLE_LOW && base->toggled_low==0)
+	if (delta_ms >= g_BCM_TTY_DELTA_MS_TO_TOGGLE_LOW && base->toggled_low==0)
 	{
 		bcm477x_bye(priv);
 		base->toggled_low = 1;
 		raz_timer();
-		mod_timer(&base->timer_idle, jiffies + msecs_to_jiffies(200 * 1));
+		mod_timer(&base->timer_idle, jiffies + msecs_to_jiffies(g_BCM_TTY_TIMER_IDLE_INTERVAL_MS * 1));
+        // KOM -- __DEBUG__
+        //GPSINFO( "[SSPBBD]gpstty driver timer_idle_callback %d jiffies delta %d jiffies => %d ms", (unsigned long)j, base->delta_since_last_write_jiffies, delta_ms);
 	}
 	else
     {
-		mod_timer(&base->timer_idle, jiffies + msecs_to_jiffies(200 * 1));
+		mod_timer(&base->timer_idle, jiffies + msecs_to_jiffies(g_BCM_TTY_TIMER_IDLE_INTERVAL_MS * 1));
 	}
 
 	spin_unlock_irqrestore(&base->lock, flags);
@@ -279,7 +301,11 @@ static void alarm_idle_arm(void)
 static void config_timer(struct bcm_tty_priv *priv)
 {
 #ifdef USE_TIMER
-
+	if(priv == NULL)
+	{
+		GPSERR(" priv is NOT init ");
+		return;
+	}
 #ifdef BCM_TTY_DEBUG
 	GPSINFO( "[SSPBBD]gpstty driver config_timer");
 #endif
@@ -300,7 +326,6 @@ static int timer_idle_try_to_cancel(void)
 #ifdef USE_TIMER
 	enum  ttyalarmtimer_type type = TXALARM_KERNEL_TIMER;
 	struct txalarm_base *base = &txalarm_bases[type];
-	unsigned long flags;
 
 #ifdef BCM_TTY_DEBUG
 	GPSINFO( "[SSPBBD]gpstty driver txalarm_try_to_cancel");
@@ -350,7 +375,11 @@ static int bcm_tty_config(struct file *f)
 	struct termios termios;
 	mm_segment_t fs;
 	long ret;
-
+	if(f == NULL)
+	{
+		GPSERR(" f is NOT init ");
+		return -1;
+	}
 	/* Change address limit */
 	fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -391,7 +420,11 @@ static int bcm_tty_config_close(struct file *f)
 	struct termios termios;
 	mm_segment_t fs;
 	long ret;
-
+	if(f == NULL)
+	{
+		GPSERR(" f is NOT init ");
+		return -1;
+	}
 	/* Change address limit */
 	fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -456,12 +489,17 @@ static int get_GPS_TTY_Port(void)
 //--------------------------------------------------------------
 static int bcm_tty_open(struct inode *inode, struct file *filp)
 {
-	/* Initially, file->private_data points device itself and we can get our priv structs from it. */
+    struct bcm_tty_priv *priv = NULL;
 #ifdef USE_TIMER
 	enum  ttyalarmtimer_type type = TXALARM_KERNEL_TIMER;
 #endif
-	struct bcm_tty_priv *priv = container_of(filp->private_data, struct bcm_tty_priv, misc);
-
+	if(inode == NULL || filp == NULL)
+	{
+		GPSERR(" pointer is NOT init ");
+		return -1;
+	}
+	priv = container_of(filp->private_data, struct bcm_tty_priv, misc);
+	/* Initially, file->private_data points device itself and we can get our priv structs from it. */
 	GPSINFO("++");
     if(get_GPS_TTY_Port()<0)
 	{
@@ -493,7 +531,7 @@ static int bcm_tty_open(struct inode *inode, struct file *filp)
 
 #ifdef USE_TIMER
 	raz_timer();
-	alarm_idle_init(type, timer_idle_callback, BCM_TTY_TIMER_IDLE_INTERVAL_MS);
+	alarm_idle_init(type, timer_idle_callback, g_BCM_TTY_TIMER_IDLE_INTERVAL_MS);
 	alarm_idle_arm();
 #endif
 
@@ -506,9 +544,20 @@ static int bcm_tty_open(struct inode *inode, struct file *filp)
 
 static int bcm_tty_release(struct inode *inode, struct file *filp)
 {
-	struct bcm_tty_priv *priv = (struct bcm_tty_priv*) filp->private_data;
-	struct file *tty = priv->tty;
-	int ret = 0;
+    struct bcm_tty_priv *priv = NULL;
+    struct file *tty = NULL;
+    int ret = 0;
+	if(inode == NULL || filp == NULL)
+	{
+		GPSERR(" pointer is NOT init ");
+		return -1;
+	}
+	priv = (struct bcm_tty_priv*) filp->private_data;
+    if (NULL == priv)
+    {
+        return -1;
+    }
+	tty = priv->tty;
 
 	GPSINFO("++");
 	priv->tty = NULL;
@@ -523,9 +572,25 @@ static int bcm_tty_release(struct inode *inode, struct file *filp)
 
 static ssize_t bcm_tty_read(struct file *filp, char __user *buf, size_t size, loff_t *ppos)
 {
-	struct bcm_tty_priv *priv = (struct bcm_tty_priv*) filp->private_data;
-	struct file *tty = priv->tty;
-	ssize_t len;
+    struct bcm_tty_priv *priv  = NULL;
+    struct file *tty = NULL;
+    ssize_t len;
+
+	if(buf == NULL || filp == NULL || ppos ==NULL)
+	{
+		GPSERR(" pointer is NOT init ");
+		return 0;
+	}
+	priv = (struct bcm_tty_priv*) filp->private_data;
+    if (NULL == priv)
+    {
+        return 0;
+    }
+    tty = priv->tty;
+    if (NULL == tty)
+    {
+        return 0;
+    }
 
 	len = tty->f_op->read(tty, buf, size, ppos);
 
@@ -534,22 +599,32 @@ static ssize_t bcm_tty_read(struct file *filp, char __user *buf, size_t size, lo
 
 static ssize_t bcm_tty_write(struct file *filp, const char __user *buf, size_t size, loff_t *ppos)
 {
-	unsigned long j = jiffies;
-	struct bcm_tty_priv *priv = (struct bcm_tty_priv*) filp->private_data;
-	struct file *tty = priv->tty;
-	ssize_t ret = 0;
-
+    unsigned long j = jiffies;
+    struct bcm_tty_priv *priv = NULL;
+    struct file *tty = NULL;
+    ssize_t ret = 0;
 #ifdef USE_TIMER
 	unsigned long flags;
 	struct txalarm_base *base = NULL;
 	enum  ttyalarmtimer_type type = TXALARM_KERNEL_TIMER;
+#endif
+	if(buf == NULL || filp == NULL || ppos ==NULL)
+	{
+		GPSERR(" pointer is NOT init ");
+		return 0;
+	}
+	priv = (struct bcm_tty_priv*) filp->private_data;
+	tty = priv->tty;
+	
+
+#ifdef USE_TIMER
 	base = &txalarm_bases[type];
 	// get priv from txalarm_bases
 	priv = (struct bcm_tty_priv *)base->priv_data;
 
 	spin_lock_irqsave(&base->lock, flags);
-	if(size > SIZE_MAX){
-		size = SIZE_MAX;
+	if(size > TTY_SIZE_MAX){
+		size = TTY_SIZE_MAX;
 	}
 	base->total_bytes_to_write+=size;
 	base->total_write_request++;
@@ -564,21 +639,31 @@ static ssize_t bcm_tty_write(struct file *filp, const char __user *buf, size_t s
 
 	ret = tty->f_op->write(tty, buf, size, ppos);
 
+    // KOM -- __DEBUG__
+    //GPSINFO( "[SSPBBD]gpstty driver, written %d of %d", ret,size);
+
 #ifndef USE_TIMER
-	bcm477x_bye(priv);
+	// KOM -- bcm477x_bye(priv);
 #endif
 	return ret;
 }
 
 static unsigned int bcm_tty_poll(struct file *filp, poll_table *wait)
 {
-	struct bcm_tty_priv *priv = (struct bcm_tty_priv*) filp->private_data;
-	struct file *tty = priv->tty;
+    struct bcm_tty_priv *priv = NULL;
+    struct file *tty = NULL;
+	if(filp == NULL || wait == NULL)
+	{
+		GPSERR(" pointer is NOT init ");
+		return 0;
+	}
+	priv = (struct bcm_tty_priv*) filp->private_data;
+	tty = priv->tty;
 
 	return tty->f_op->poll(tty, wait);
 }
 
-int bcm4774_suspend(struct platform_device *p, pm_message_t state)
+int bcm4774_suspend(gps_tty_platform_device *p, pm_message_t state)
 {
 	struct tty_struct *ttypoint;
 	struct file *ttyfile;
@@ -607,7 +692,7 @@ int bcm4774_suspend(struct platform_device *p, pm_message_t state)
 	return 0;
 }
 
-int bcm4774_resume(struct platform_device *p)
+int bcm4774_resume(gps_tty_platform_device *p)
 {
 	struct tty_struct *ttypoint;
 	struct file *ttyfile;
@@ -625,6 +710,8 @@ int bcm4774_resume(struct platform_device *p)
 		GPSERR(" ttypoint is NULL ");
 		return 0;
 	}
+
+    tty_port_raise_dtr_rts(ttypoint->port);
 
 	/* Enable auto uart flow control by hardware, manual uart flow control by register is disabled */
 	if (bcm_tty_config(ttyfile)) {
@@ -666,9 +753,10 @@ static int __init bcm_tty_init(void)
 
 	int ret;
 	int mcu_req = 0;
-	int mcu_resp = 0;
+	//int mcu_resp = 0;
 	//int host_req = 0;
 	/* Check GPIO# */
+    struct device_node *np = NULL;
 
 #ifdef CONFIG_HWCONNECTIVITY
     //For OneTrack, we need check it's the right chip type or not.
@@ -680,7 +768,11 @@ static int __init bcm_tty_init(void)
         GPSINFO("bcm tty chip type is matched with Broadcom, continue");
     }
 #endif
-
+    if (GPS_IC_TYPE_4775 == get_gps_ic_type()) {
+        GPSINFO("set tty time parameter for 4775");
+        g_BCM_TTY_DELTA_MS_TO_TOGGLE_LOW = 100;
+        g_BCM_TTY_TIMER_IDLE_INTERVAL_MS = 25;
+    }
 	/*===================================================
 	  We need folowing OF node in dts
 
@@ -690,27 +782,36 @@ static int __init bcm_tty_init(void)
 		  ssp-host-req = <some_gpio_number>
 	  }
 	  ===================================================== */
-	struct device_node *np = of_find_node_by_name(NULL, "gps_power");
+	np = of_find_node_by_name(NULL, "gps_power");
 	if (!np) {
 		GPSERR("[SSPBBD]gpstty driver fail to find OF node huawei,gps_power");
 		goto err_exit;
 	}
 	mcu_req = of_get_named_gpio(np,"huawei,mcu_req",0);
-	mcu_resp = of_get_named_gpio(np,"huawei,mcu_req_rsp",0);
+	//mcu_resp = of_get_named_gpio(np,"huawei,mcu_req_rsp",0);
 	//host_req = of_get_named_gpio(np,"huawei,gps_hostwake",0);
 #ifdef BCM_TTY_DEBUG_INFO
-	GPSINFO("[SSPBBD]gpstty driver huawei,mcu_req=%d, huawei,mcu_req_rsp=%d",  mcu_req, mcu_resp);
+	GPSINFO("[SSPBBD]gpstty driver huawei,mcu_req=%d",  mcu_req);
 #endif
-	if (mcu_req<0 || mcu_resp<0) {
+	if (mcu_req<0) {
 		GPSERR("[SSPBBD]: GPIO value not correct");
 		goto err_exit;
 	}
 
 	/* Config GPIO */
-	gpio_request(mcu_req, "MCU REQ");
-	gpio_direction_output(mcu_req, 0);
-	gpio_request(mcu_resp, "MCU RESP");
-	gpio_direction_input(mcu_resp);
+	ret = gpio_request(mcu_req, "MCU REQ");
+	if (ret)
+	{
+		GPSERR("MCU REQ gpio=%d, gpio_request fail. ret=%d", mcu_req, ret);
+	}
+
+	ret = gpio_direction_output(mcu_req, 0);
+	if (ret) {
+		GPSERR("gpio_direction_output %d failed, ret:0x%X", mcu_req, ret);
+	}
+
+	//gpio_request(mcu_resp, "MCU RESP");
+	//gpio_direction_input(mcu_resp);
 
 	/* Alloc */
 	priv = (struct bcm_tty_priv*) kmalloc(sizeof(*priv), GFP_KERNEL);
@@ -719,12 +820,12 @@ static int __init bcm_tty_init(void)
 		goto err_exit;
 	}
 
-	memset(priv, 0, sizeof(*priv));
+	memset(priv, 0, sizeof(struct bcm_tty_priv));
 
 	/* Init - gpios */
 	//priv->host_req = host_req;
 	priv->mcu_req  = mcu_req;
-	priv->mcu_resp = mcu_resp;
+	//priv->mcu_resp = mcu_resp;
 
 	/* Register misc device */
 	priv->misc.minor = MISC_DYNAMIC_MINOR;

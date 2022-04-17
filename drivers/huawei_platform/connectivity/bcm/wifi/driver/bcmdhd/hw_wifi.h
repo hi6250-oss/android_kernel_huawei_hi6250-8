@@ -29,6 +29,9 @@ HUAWEI-2014.007:       0728             set bcn_timeout for beacon loss and roam
 #include <huawei_platform/power/wifi_filter/wifi_filter.h>
 #endif
 
+#ifdef HW_OTP_CHECK
+#include <linux/crc16.h>
+#endif
 #ifdef HW_AP_POWERSAVE
 #include <linux/fb.h>
 #endif
@@ -69,7 +72,10 @@ extern volatile bool g_wifi_firstwake;
 #define DHO_MESSAGETYPE     53
 #define DHO_SERVERID        54
 #define DHO_END             255
-
+#ifdef CONFIG_HW_WIFI_DMA_ADDR_CTRL
+#define ATLANTA_CODE_ADDR_BEGIN	  0x80000
+#define ATLANTA_CODE_ADDR_END	  0x1100000
+#endif
 
 struct dhcp_message {
     uint8_t op;             /* message type */
@@ -546,4 +552,31 @@ extern void hw_dhd_looplog(const char *fmt, ...);
 extern void hw_dhd_looplog_end(void);
 #endif
 
+#ifdef HW_OTP_CHECK
+#ifdef CONFIG_BCMDHD_SDIO
+#define SROM_MAX        (768)
+#else
+#define SROM_MAX        (1536)
+#endif
+
+#define CRC_16_SIZE     (sizeof(u16))
+#define OTP_BUF_SIZE    (SROM_MAX+CRC_16_SIZE)
+#define HW_OTP_CMD    "otpimage"
+#define HW_OTP_FILENAME "/data/vendor/wifi/wifi_otp"
+
+typedef struct _otp_check_info {
+    int offset_start;
+    int offset_end;
+    int error_sum;
+} otp_check_info_t;
+
+extern void hw_check_chip_otp(dhd_pub_t *dhd);
+#endif
+#ifdef HW_SOFTAP_BUGFIX
+extern void hw_reset_beacon_interval(struct net_device *ndev);
+#endif
+#ifdef HW_PATCH_FOR_HANG
+extern int hw_need_hang_with_assoc_status(int status);
+extern int hw_need_hang_with_scanbusy(int error);
+#endif
 #endif /* end of __HW_WIFI_H__ */

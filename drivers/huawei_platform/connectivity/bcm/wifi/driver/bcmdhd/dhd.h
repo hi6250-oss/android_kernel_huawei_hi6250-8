@@ -255,7 +255,8 @@ enum dhd_hang_reason {
 	HANG_REASON_HT_AVAIL_ERROR = 0x8008,
 	HANG_REASON_PCIE_RC_LINK_UP_FAIL = 0x8009,
 	HANG_REASON_WLC_DOWN = 0x800a,
-	HANG_REASON_MAX = 0x800b
+	HANG_REASON_WLC_MEMORY_LEAK = 0x800b,
+	HANG_REASON_MAX = 0x800c
 };
 
 enum dhd_rsdb_scan_features {
@@ -1157,6 +1158,7 @@ extern int dhd_keep_alive_onoff(dhd_pub_t *dhd);
 #define DHD_APF_LOCK(ndev)		dhd_apf_lock(ndev)
 #define DHD_APF_UNLOCK(ndev)	dhd_apf_unlock(ndev)
 
+extern void dhd_dev_get_drop_pkt(dhd_pub_t *dhd, uint32 on);
 extern void dhd_apf_lock(struct net_device *dev);
 extern void dhd_apf_unlock(struct net_device *dev);
 extern int dhd_dev_apf_get_version(struct net_device *ndev, uint32 *version);

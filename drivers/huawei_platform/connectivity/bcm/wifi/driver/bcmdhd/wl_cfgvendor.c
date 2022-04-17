@@ -987,7 +987,7 @@ static int wl_cfgvendor_epno_cfg(struct wiphy *wiphy,
 	int err = 0;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	dhd_pno_ssid_t *ssid_elem;
-	int tmp, tmp1, tmp2, type, num = 0;
+	int tmp, tmp1, tmp2, type = 0, num = 0;
 	const struct nlattr *outer, *inner, *iter;
 	uint32 cnt_ssid = 0;
 	wl_pfn_ssid_params_t params;
@@ -1335,7 +1335,8 @@ static int wl_cfgvendor_gscan_anqpo_config(struct wiphy *wiphy,
 				break;
 			default:
 				WL_ERR(("Unknown type: %d\n", type));
-				return err;
+				goto exit;
+
 		}
 	}
 
@@ -1381,7 +1382,8 @@ static int wl_cfgvendor_gscan_anqpo_config(struct wiphy *wiphy,
 
 	kfree(anqpo_hs_list);
 exit:
-	kfree(hs_list);
+	if(hs_list)
+	    kfree(hs_list);
 	return err;
 }
 
@@ -1644,6 +1646,10 @@ static int wl_cfgvendor_set_bssid_pref(struct wiphy *wiphy,
 			case GSCAN_ATTRIBUTE_BSSID_PREF_LIST:
 				if (!num)
 					return -EINVAL;
+				if(bssid_pref) {
+					kfree(bssid_pref);
+					bssid_pref = NULL;
+                                }
 				if ((bssid_pref = create_bssid_pref_cfg(num)) == NULL) {
 					WL_ERR(("%s: Can't malloc memory\n", __FUNCTION__));
 					err = -ENOMEM;
@@ -1698,7 +1704,8 @@ static int wl_cfgvendor_set_bssid_pref(struct wiphy *wiphy,
 	err = dhd_dev_set_lazy_roam_bssid_pref(bcmcfg_to_prmry_ndev(cfg),
 	          bssid_pref, flush);
 exit:
-	kfree(bssid_pref);
+	if(bssid_pref)
+            kfree(bssid_pref);
 	return err;
 }
 
@@ -1890,6 +1897,10 @@ static int wl_cfgvendor_set_ssid_whitelist(struct wiphy *wiphy,
 #else
 					mem_needed += (num - 1) * sizeof(ssid_info_t);
 #endif
+				if(ssid_whitelist) {
+					kfree(ssid_whitelist);
+					ssid_whitelist = NULL;
+                                }
 				ssid_whitelist = (wl_ssid_whitelist_t *)
 				        kzalloc(mem_needed, GFP_KERNEL);
 				if (ssid_whitelist == NULL) {
@@ -1907,7 +1918,8 @@ static int wl_cfgvendor_set_ssid_whitelist(struct wiphy *wiphy,
 			case GSCAN_ATTRIBUTE_WHITELIST_SSID_ELEM:
 				if (!num || !ssid_whitelist) {
 					WL_ERR(("num ssid is not set!\n"));
-					return -EINVAL;
+                                        err = -EINVAL;
+                                        goto exit;
 				}
 				if (i >= num) {
 					WL_ERR(("CFGs don't seem right!\n"));
@@ -1969,7 +1981,8 @@ static int wl_cfgvendor_set_ssid_whitelist(struct wiphy *wiphy,
 	err = dhd_dev_set_whitelist_ssid(bcmcfg_to_prmry_ndev(cfg),
 	          ssid_whitelist, mem_needed, flush);
 exit:
-	kfree(ssid_whitelist);
+       if(ssid_whitelist)
+	    kfree(ssid_whitelist);
 	return err;
 }
 #ifdef BCM_BSSID_BLACKLIST
@@ -2113,7 +2126,7 @@ static int
 wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 	const void *data, int len) {
 	int err = 0, rem, rem1, rem2, type;
-	int target_cnt;
+	int target_cnt = 0;
 	rtt_config_params_t rtt_param;
 	rtt_target_info_t* rtt_target = NULL;
 	const struct nlattr *iter, *iter1, *iter2;
@@ -2125,6 +2138,7 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 	feature_set = dhd_dev_get_feature_set(bcmcfg_to_prmry_ndev(cfg));
 
 	WL_DBG(("In\n"));
+	memset(&rtt_param, 0, sizeof(rtt_param));
 	err = dhd_dev_rtt_register_noti_callback(wdev->netdev, wdev, wl_cfgvendor_rtt_evt);
 	if (err < 0) {
 		WL_ERR(("failed to register rtt_noti_callback\n"));
@@ -2136,7 +2150,6 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 		goto exit;
 	}
 
-	memset(&rtt_param, 0, sizeof(rtt_param));
 #ifdef BCM_PATCH_2016_12_2017_01
 	if (len <= 0) {
 		err = BCME_ERROR;
@@ -2147,6 +2160,11 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 		type = nla_type(iter);
 		switch (type) {
 		case RTT_ATTRIBUTE_TARGET_CNT:
+			if (target_cnt != 0) {
+				WL_ERR(("attempt to overwrite target_cnt"));
+				err = -EINVAL;
+				goto exit;
+			}
 			target_cnt = nla_get_u8(iter);
 #ifdef BCM_PATCH_2016_12_2017_01
 			if ((target_cnt <= 0) ||
@@ -2179,10 +2197,21 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 #endif
 			rtt_target = rtt_param.target_info;
 			nla_for_each_nested(iter1, iter, rem1) {
+				if ((uint8 *)rtt_target >= ((uint8 *)rtt_param.target_info +
+					TARGET_INFO_SIZE(target_cnt))) {
+					WL_ERR(("rtt_target increased over its max size"));
+					err = -EINVAL;
+					goto exit;
+				}
 				nla_for_each_nested(iter2, iter1, rem2) {
 					type = nla_type(iter2);
 					switch (type) {
 					case RTT_ATTRIBUTE_TARGET_MAC:
+						if (nla_len(iter2) != ETHER_ADDR_LEN) {
+							WL_ERR(("mac_addr length not match\n"));
+							err = -EINVAL;
+							goto exit;
+						}
 						memcpy(&rtt_target->addr, nla_data(iter2),
 							ETHER_ADDR_LEN);
 						break;
@@ -2296,7 +2325,9 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 	}
 exit:
 	/* free the target info list */
-	kfree(rtt_param.target_info);
+	if (NULL != rtt_param.target_info) {
+		kfree(rtt_param.target_info);
+	}
 #ifdef BCM_PATCH_2016_12_2017_01
 	rtt_param.target_info = NULL;
 #endif
@@ -2710,7 +2741,7 @@ static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 	int buf_len = 0;
 	void __user *user_buf = NULL;
 	const struct nlattr *iter;
-	char *mem_buf;
+	char *mem_buf = NULL;
 	struct sk_buff *skb;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 
@@ -2764,7 +2795,9 @@ static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 	}
 
 free_mem:
-	vfree(mem_buf);
+	if (NULL != mem_buf) {
+		vfree(mem_buf);
+	}
 exit:
 	return ret;
 }

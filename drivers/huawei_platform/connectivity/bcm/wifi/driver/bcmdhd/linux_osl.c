@@ -48,7 +48,11 @@
 
 
 #ifdef CONFIG_ARM64
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+#include <linux/pci-dma-compat.h>
+#else
 #include <asm-generic/pci-dma-compat.h>
+#endif
 #endif
 #include <linux/fs.h>
 
@@ -59,6 +63,10 @@
 #ifdef BCM_OBJECT_TRACE
 #include <bcmutils.h>
 #endif /* BCM_OBJECT_TRACE */
+
+#ifdef HW_WIFI_DMD_LOG
+#include <hw_wifi.h>
+#endif
 
 #define PCI_CFG_RETRY		10
 
@@ -124,6 +132,10 @@ static bcm_static_buf_t *bcm_static_buf = 0;
 #define STATIC_PKT_1PAGE_NUM	8
 #define STATIC_PKT_2PAGE_NUM	8
 #endif /* DHD_USE_STATIC_CTRLBUF */
+
+#ifdef CONFIG_HW_WIFI_DMA_ADDR_CTRL
+#define DMA_ERROR_COUNT	  5
+#endif
 
 #define STATIC_PKT_1_2PAGE_NUM	\
 	((STATIC_PKT_1PAGE_NUM) + (STATIC_PKT_2PAGE_NUM))
@@ -366,7 +378,7 @@ osl_attach(void *pdev, uint bustype, bool pkttag)
 	if (!(osh = kmalloc(sizeof(osl_t), flags)))
 		return osh;
 
-	ASSERT(osh);
+	//ASSERT(osh);
 
 	bzero(osh, sizeof(osl_t));
 
@@ -1438,6 +1450,33 @@ osl_pktclear_static(osl_t *osh)
 #endif /* CONFIG_DHD_USE_STATIC_BUF */
 #endif /* BCM_PCIE_UPDATE */
 
+void
+osl_pktfree_all_static(osl_t *osh)
+{
+#ifdef DHD_USE_STATIC_CTRLBUF
+        int i;
+        unsigned long flags;
+#endif /* DHD_USE_STATIC_CTRLBUF */
+
+        if (!bcm_static_skb) {
+                printf("%s: bcm_static_skb is NULL\n", __FUNCTION__);
+                return;
+        }
+
+#ifdef DHD_USE_STATIC_CTRLBUF
+        spin_lock_irqsave(&bcm_static_skb->osl_pkt_lock, flags);
+
+        for (i = 0; i < STATIC_PKT_2PAGE_NUM; i++) {
+                if (bcm_static_skb->pkt_use[i] != 0) {
+                        bcm_static_skb->pkt_use[i] = 0;
+                        bcm_static_skb->skb_8k[i]->mac_len = PREALLOC_FREE_MAGIC;
+                }
+        }
+        spin_unlock_irqrestore(&bcm_static_skb->osl_pkt_lock, flags);
+        printf("%s: bcm_static_skb pkt_use is clear\n", __FUNCTION__);
+#endif /* DHD_USE_STATIC_CTRLBUF */
+}
+
 uint32
 osl_pci_read_config(osl_t *osh, uint offset, uint size)
 {
@@ -1806,6 +1845,9 @@ osl_dma_free_consistent(osl_t *osh, void *va, uint size, dmaaddr_t pa)
 #endif
 }
 
+#ifdef CONFIG_HW_WIFI_DMA_ADDR_CTRL
+static unsigned int dma_error_count = 0;
+#endif
 
 dmaaddr_t BCMFASTPATH
 osl_dma_map(osl_t *osh, void *va, uint size, int direction, void *p, hnddma_seg_map_t *dmah)
@@ -1860,6 +1902,23 @@ osl_dma_map(osl_t *osh, void *va, uint size, int direction, void *p, hnddma_seg_
 #else
 	ret = 0;
 #endif
+
+#ifdef CONFIG_HW_WIFI_DMA_ADDR_CTRL
+	if ((map_addr > ATLANTA_CODE_ADDR_BEGIN) && (map_addr < ATLANTA_CODE_ADDR_END)) {
+		if (dma_error_count < DMA_ERROR_COUNT) {
+			dma_error_count++;
+			printk("%s: map_addr is error, map_addr = %u, dma_error_count = %d\n", __FUNCTION__, (u32)map_addr, dma_error_count);
+			ret = 1;
+		} else {
+			printk("%s: map_addr is error and more than 5 times, map_addr = %u, dma_error_count = %d\n", __FUNCTION__, (u32)map_addr, dma_error_count);
+			dma_error_count = 0;
+		}
+#ifdef HW_WIFI_DMD_LOG
+		hw_wifi_dsm_client_notify(DSM_WIFI_CMD53_ERROR, "%s: map_addr is error %x, count is %d\n", __FUNCTION__, map_addr, dma_error_count);
+#endif
+	}
+#endif
+
 	if (ret) {
 		printk("%s: Failed to map memory\n", __FUNCTION__);
 		PHYSADDRLOSET(ret_addr, 0);

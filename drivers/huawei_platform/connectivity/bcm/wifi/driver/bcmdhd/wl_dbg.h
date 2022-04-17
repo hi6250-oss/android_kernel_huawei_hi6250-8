@@ -187,6 +187,7 @@ extern uint32 wl_msg_level2;
 #define WL_NONE(args)
 
 #define	WL_ERROR(args)
+#undef WL_TRACE
 #define	WL_TRACE(args)
 #define WL_APSTA_UPDN(args)
 #define WL_APSTA_RX(args)

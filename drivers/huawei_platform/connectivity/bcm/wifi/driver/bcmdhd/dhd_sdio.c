@@ -7846,10 +7846,10 @@ dhdsdio_resume(void *context)
  */
 
 static bcmsdh_driver_t dhd_sdio = {
-	dhdsdio_probe,
-	dhdsdio_disconnect,
-	dhdsdio_suspend,
-	dhdsdio_resume
+	.probe = dhdsdio_probe,
+	.remove = dhdsdio_disconnect,
+	.suspend = dhdsdio_suspend,
+	.resume = dhdsdio_resume
 };
 
 int

@@ -348,7 +348,7 @@ dhd_dbg_ring_push(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_entry_t *hdr, void 
 		dhdp->dbg->pullreq(dhdp->dbg->private, ring->id);
 	return  BCME_OK;
 }
-
+#ifdef SHOW_LOGTRACE
 static int
 dhd_dbg_msgtrace_seqchk(uint32 *prev, uint32 cur)
 {
@@ -549,7 +549,7 @@ dhd_dbg_custom_evnt_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 	}
 	return ret;
 }
-#ifdef SHOW_LOGTRACE
+
 #define MAX_NO_OF_ARG	16
 #define FMTSTR_SIZE	100
 #define SIZE_LOC_STR	50

@@ -1539,6 +1539,7 @@ wl_get_netinfo_by_wdev(struct bcm_cfg80211 *cfg, struct wireless_dev *wdev)
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
 #define STA_INFO_BIT(info) (1ul << NL80211_STA_ ## info)
+#undef strnicmp
 #define strnicmp(str1, str2, len) strncasecmp((str1), (str2), (len))
 #else
 #define STA_INFO_BIT(info) (STATION_ ## info)

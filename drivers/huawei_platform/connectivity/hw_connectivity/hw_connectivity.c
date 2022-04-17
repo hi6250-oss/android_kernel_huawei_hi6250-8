@@ -25,7 +25,7 @@ static char g_chip_type[CHIP_TYPE_LEN] = {0};
 static char g_nfc_chip_type[CHIP_TYPE_LEN] = {0};
 
 
-static ssize_t hwconn_read_proc_chiptype(struct file *filp, const char __user *buffer, size_t len, loff_t *off)
+static ssize_t hwconn_read_proc_chiptype(struct file *filp, char __user *buffer, size_t len, loff_t *off)
 {
     printk(KERN_INFO "[HW_CONN] hwconn_read_proc_chiptype\n");
     if (len < 1 || NULL == g_chip_type) {
@@ -33,7 +33,7 @@ static ssize_t hwconn_read_proc_chiptype(struct file *filp, const char __user *b
         return -EINVAL;
     }
 
-    printk(KERN_INFO "[HW_CONN] hwconn_read_proc_chiptype off = %d\n", (unsigned long)*off);
+    printk(KERN_INFO "[HW_CONN] hwconn_read_proc_chiptype off = %ld\n", (unsigned long)*off);
     if ((unsigned long)*off > 0) {
         return 0;
     }
@@ -58,7 +58,7 @@ static const struct file_operations hwconn_proc_fops_chiptype= {
    .read = hwconn_read_proc_chiptype,
 };
 
-static ssize_t hwconn_read_proc_nfc_chiptype(struct file *filp, const char __user *buffer, size_t len, loff_t *off)
+static ssize_t hwconn_read_proc_nfc_chiptype(struct file *filp, char __user *buffer, size_t len, loff_t *off)
 {
     printk(KERN_INFO "[HW_CONN] hwconn_read_proc_nfc_chiptype\n");
     if (len < 1 || NULL == g_nfc_chip_type)
@@ -67,7 +67,7 @@ static ssize_t hwconn_read_proc_nfc_chiptype(struct file *filp, const char __use
         return -EINVAL;
     }
 
-    printk(KERN_INFO "[HW_CONN] hwconn_read_proc_nfc_chiptype off = %d\n", (unsigned long)*off);
+    printk(KERN_INFO "[HW_CONN] hwconn_read_proc_nfc_chiptype off = %ld\n", (unsigned long)*off);
     if ((unsigned long)*off > 0)
     {
         return 0;
@@ -133,7 +133,7 @@ static int create_hwconn_proc_file(void)
 
 static int read_chip_type_from_dts(char *buf, int buf_len) {
     struct device_node *np;
-    char *chiptype = NULL;
+    const char *chiptype = NULL;
     int ret = 0;
 
     if (!buf || buf_len <= 0) {
@@ -166,7 +166,7 @@ static int read_chip_type_from_dts(char *buf, int buf_len) {
 static int read_nfc_chip_type_from_dts(char *buf, int buf_len)
 {
     struct device_node *np;
-    char *chiptype = NULL;
+    const char *chiptype = NULL;
     int ret = 0;
 
     if (!buf || buf_len <= 0)

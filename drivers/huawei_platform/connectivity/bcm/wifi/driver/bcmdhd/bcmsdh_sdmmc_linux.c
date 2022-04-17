@@ -37,6 +37,10 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/sdio_func.h>
 #include <linux/mmc/sdio_ids.h>
+#ifdef BCMSDIO
+#include <linux/mmc/dw_mmc.h>
+#include <mmc/host/dw_mmc.h>
+#endif
 #include <dhd_linux.h>
 #include <bcmsdh_sdmmc.h>
 #include <dhd_dbg.h>
@@ -87,7 +91,9 @@ extern int bcmsdh_remove(bcmsdh_info_t *bcmsdh);
 
 int sdio_function_init(void);
 void sdio_function_cleanup(void);
-
+#ifdef BCMSDIO
+int brcm_mmc_irq = -1;
+#endif
 #define DESCRIPTION "bcmsdh_sdmmc Driver"
 #define AUTHOR "Broadcom Corporation"
 
@@ -120,7 +126,12 @@ static int sdioh_probe(struct sdio_func *func)
 #ifdef WL_CFG80211
 	wl_cfg80211_set_parent_dev(&func->dev);
 #endif
-
+#ifdef BCMSDIO
+	struct dw_mci_slot *slot = (struct dw_mci_slot *)mmc_priv(func->card->host);
+	struct dw_mci *host = slot->host;
+	sd_err(("get mmc hw irqs %d for wifi",host->irq));
+	brcm_mmc_irq = host->irq;
+#endif
 	 /* allocate SDIO Host Controller state info */
 	 osh = osl_attach(&func->dev, SDIO_BUS, TRUE);
 	 if (osh == NULL) {

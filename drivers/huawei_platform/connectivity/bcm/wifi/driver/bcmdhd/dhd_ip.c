@@ -222,7 +222,7 @@ _tdata_psh_info_pool_enq(tcpack_sup_module_t *tcpack_sup_mod,
 	tdata_psh_info_t *tdata_psh_info)
 {
 	if ((tcpack_sup_mod == NULL) || (tdata_psh_info == NULL)) {
-		DHD_ERROR(("%s %d: ERROR %p %p\n", __FUNCTION__, __LINE__,
+		DHD_ERROR(("%s %d: ERROR %pK %pK\n", __FUNCTION__, __LINE__,
 			tcpack_sup_mod, tdata_psh_info));
 		return;
 	}

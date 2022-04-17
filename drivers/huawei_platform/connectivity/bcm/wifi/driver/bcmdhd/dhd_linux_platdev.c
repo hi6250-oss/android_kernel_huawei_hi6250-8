@@ -331,6 +331,28 @@ int wifi_platform_get_chip_type(wifi_adapter_info_t *adapter, unsigned char *buf
 }
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
 
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+int wifi_platform_get_bcn_timeout(wifi_adapter_info_t *adapter, int def_val)
+{
+	struct wifi_platform_data *plat_data;
+	int bcn_timeout = -1;
+
+	if (!adapter || !adapter->wifi_plat_data) {
+		DHD_ERROR(("%s: the input param is invalid\n", __FUNCTION__));
+		return def_val;
+	}
+
+	plat_data = adapter->wifi_plat_data;
+	if (plat_data->get_bcn_timeout) {
+		bcn_timeout = plat_data->get_bcn_timeout();
+		return bcn_timeout > 0 ? bcn_timeout : def_val;
+	}
+
+	DHD_ERROR(("%s: plat_data->get_bcn_timeout is null\n", __FUNCTION__));
+	return def_val;
+}
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
+
 static int wifi_plat_dev_drv_probe(struct platform_device *pdev)
 {
 	struct resource *resource;

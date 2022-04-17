@@ -39,6 +39,7 @@
 #include <linux/ctype.h>
 #include <linux/export.h>
 #include <linux/mmc/dw_mmc.h>
+#include <linux/module.h>
 #ifdef CONFIG_HWCONNECTIVITY
 #include <huawei_platform/connectivity/hw_connectivity.h>
 #endif
@@ -46,6 +47,8 @@
 
 #include "dev_wifi.h"
 #include "hw_driver_register.h"
+#include <linux/mtd/hisi_nve_interface.h>
+
 
 #define HW_FAC_GPIO_VAL_LOW     20700
 #define HW_FAC_GPIO_VAL_HIG     20701
@@ -67,6 +70,11 @@ static struct WIFI_VCC_CMD_S vcc_setvol_cmd = {WIFI_REGU_SET_VOLTAGE, &wifi_vcci
 
 struct wifi_host_s *wifi_host;
 struct dev_wifi_handle dev_handle;
+
+#if defined(HW_WIFI_FACTORY_MODE)
+struct clk *g_pmic_clk = NULL;
+int init_wifi_pmic_clock(struct platform_device *pdev);
+#endif
 
 #ifdef CONFIG_DHD_USE_STATIC_BUF
 void *wlan_static_prot = NULL;
@@ -105,7 +113,7 @@ void *wifi_mem_prealloc(int section, unsigned long size) {
     int mem_idx = 0;
     if (section == DHD_PREALLOC_PROT) {
         if (size > DHD_PREALLOC_PROT_SIZE) {
-            printk("bcmdhd request prot(%lu) is bigger than static size(%ld).\n",
+            printk("bcmdhd request prot(%lu) is bigger than static size(%d).\n",
                 size, DHD_PREALLOC_PROT_SIZE);
             return NULL;
         }
@@ -270,7 +278,7 @@ static int init_wifi_mem(void) {
     }
 #endif /* !defined(CONFIG_BCMDHD_PCIE) */
     return 0;
-
+#if !defined(CONFIG_BCMDHD_PCIE)
 err_sec_alloc:
     for (i = 0; i < PREALLOC_WLAN_SEC_NUM; i++) {
         if (wifi_mem_array[i].mem_ptr != NULL) {
@@ -280,7 +288,7 @@ err_sec_alloc:
             break;
         }
     }
-
+#endif /* !defined(CONFIG_BCMDHD_PCIE) */
 err_mem_alloc:
 
     if (wlan_static_prot)
@@ -386,7 +394,7 @@ static void read_from_global_buf(unsigned char * buf)
 	hwlog_info("get MAC from g_wifimac: mac=%02x:%02x:**:**:%02x:%02x\n",buf[0],buf[1],buf[4],buf[5]);
 	return;
 }
-
+#ifdef CONFIG_LLT_TEST
 static int char2_byte( char* strori, char* outbuf )
 {
 	int i = 0;
@@ -477,35 +485,110 @@ static int read_from_mac_file(unsigned char * buf)
 
 	return 0;
 }
+#endif
+int char2byte( char* strori, char* outbuf )
+{
+    int i = 0;
+    int temp = 0;
+    int sum = 0;
 
+    for( i = 0; i < 12; i++ )
+    {
+        switch (strori[i]) {
+            case '0' ... '9':
+                temp = strori[i] - '0';
+                break;
+
+            case 'a' ... 'f':
+                temp = strori[i] - 'a' + 10;
+                break;
+
+            case 'A' ... 'F':
+                temp = strori[i] - 'A' + 10;
+                break;
+        }
+
+        sum += temp;
+        if( i % 2 == 0 ){
+            outbuf[i/2] |= temp << 4;
+        }
+        else{
+            outbuf[i/2] |= temp;
+        }
+    }
+
+    return sum;
+}
+
+static bool validate_wifi_addr(unsigned char macAddr)
+{
+	unsigned char mac1 = macAddr & 0x0F;
+
+	// legal wifi mac, mac1 should be 0,4,8 or ox0c
+	if (mac1 == 0x00 || mac1 == 0x04 || mac1 == 0x08 || mac1 == 0x0c)
+		return true;
+
+	hwlog_err("%s: illeagle wifi address: %02x", __func__, macAddr);
+	return false;
+}
+/*****************************************************************************
+ 函 数 名  : bcm_wifi_get_mac_addr
+ 功能描述  : 从nvram中获取mac地址
+             如果获取失败，则随机一个mac地址
+ 返 回 值  : 0成功，-1失败
+
+*****************************************************************************/
 int bcm_wifi_get_mac_addr(unsigned char *buf)
 {
-	int ret = -1;
+    struct hisi_nve_info_user st_info;
+    int l_ret = -1;
+    int l_sum = 0;
 
-	if (NULL == buf) {
-		hwlog_err("%s: k3v2_wifi_get_mac_addr failed\n", __func__);
-		return -1;
-	}
+    if (NULL == buf) {
+        hwlog_err("%s: k3v2_wifi_get_mac_addr failed\n", __func__);
+        return -1;
+    }
+    memset(buf, 0, WLAN_MAC_LEN);
 
-	memset(buf, 0, WLAN_MAC_LEN);
-	if (0 != g_wifimac[0] || 0 != g_wifimac[1] || 0 != g_wifimac[2] || 0 != g_wifimac[3]|| 0 != g_wifimac[4] || 0 != g_wifimac[5]){
-		read_from_global_buf(buf);
-		return 0;
-	}
 
-	ret = read_from_mac_file(buf);
-	if(0 == ret){
-		hwlog_err("%s:read from mac addr file success \n",__func__);
-		memcpy(g_wifimac,buf,WLAN_MAC_LEN);
-		return 0;
-	}else{
-		get_random_bytes(buf,WLAN_MAC_LEN);
-		buf[0] = 0x0;
-		hwlog_err("get MAC from Random: mac=%02x:%02x:%02x:%02x:%02x:%02x\n",buf[0],buf[1],buf[2],buf[3],buf[4],buf[5]);
-		memcpy(g_wifimac,buf,WLAN_MAC_LEN);
-	}
+    memset(&st_info, 0, sizeof(st_info));
+    st_info.nv_number  = NV_WLAN_NUM;   //nve item
 
-	return 0;
+    strncpy(st_info.nv_name, "MACWLAN", sizeof("MACWLAN"));
+
+    st_info.valid_size = NV_WLAN_VALID_SIZE;
+    st_info.nv_operation = NV_READ;
+
+    if (0 != g_wifimac[0] || 0 != g_wifimac[1] || 0 != g_wifimac[2] || 0 != g_wifimac[3]|| 0 != g_wifimac[4] || 0 != g_wifimac[5]){
+        read_from_global_buf(buf);
+        return 0;
+    }
+
+    l_ret = hisi_nve_direct_access(&st_info);
+
+    if (!l_ret)
+    {
+        l_sum = char2byte(st_info.nv_data, buf);
+        if (0 != l_sum && validate_wifi_addr(buf[0]))
+        {
+            hwlog_info("get MAC from NV: mac=%02x:%02x:%02x:%02x:%02x:%02x\n",buf[0],buf[1],buf[2],buf[3],buf[4],buf[5]);
+            memcpy(g_wifimac, buf, WLAN_MAC_LEN);
+        }else{
+            get_random_bytes(buf,WLAN_MAC_LEN);
+            buf[0] = 0x0;
+            hwlog_info("get MAC from Random: mac=%02x:%02x:%02x:%02x:%02x:%02x\n",buf[0],buf[1],buf[2],buf[3],buf[4],buf[5]);
+            memcpy(g_wifimac,buf,WLAN_MAC_LEN);
+
+        }
+    }else{
+        get_random_bytes(buf,WLAN_MAC_LEN);
+        buf[0] = 0x0;
+        hwlog_info("get MAC from Random: mac=%02x:%02x:%02x:%02x:%02x:%02x\n",buf[0],buf[1],buf[2],buf[3],buf[4],buf[5]);
+        memcpy(g_wifimac,buf,WLAN_MAC_LEN);
+
+    }
+
+    return 0;
 }
 
 
@@ -553,10 +636,7 @@ int bcm_wifi_power(int on)
         }
 #endif
 		wifi_host->bEnable = true;
-		//hi_sdio_set_power(on); 
 	} else {
-		//hi_sdio_set_power(on);
-		//dump_stack();
 #if defined(CONFIG_BCMDHD_SDIO) && (defined(CONFIG_MMC_DW_HI6XXX) || defined(CONFIG_MMC_DW_HI3XXX))
 		/* set LowerPower mode*/
 		if (!(IS_ERR(wifi_host->pctrl)||IS_ERR(wifi_host->pins_idle))){
@@ -628,6 +708,13 @@ static int bcm_wifi_get_chip_type(char *val, int len)
 }
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
 
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+static int bcm_wifi_get_bcn_timeout(void)
+{
+    return wifi_host ? wifi_host->bcn_timeout : -1;
+}
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
+
 #ifdef CONFIG_MMC_DW_HI3XXX
 extern void dw_mci_sdio_card_detect_change(void);
 #endif
@@ -670,11 +757,12 @@ static ssize_t restore_wifi_debug_level(struct device *dev, struct device_attrib
 
 static ssize_t show_wifi_wrong_action_flag(struct device *dev,
         struct device_attribute *attr, char *buf) {
+    int has_wrong_action;
     if(dev_handle.wl_get_wrong_action_flag_handle == NULL) {
         hwlog_err("%s: handle has not been registered\n", __func__);
         return -1;
     }
-    int has_wrong_action = dev_handle.wl_get_wrong_action_flag_handle();
+    has_wrong_action = dev_handle.wl_get_wrong_action_flag_handle();
     hwlog_info("%s has wrong action %d\n", __func__, has_wrong_action);
     return sprintf(buf, "%d\n", has_wrong_action);
 }
@@ -703,7 +791,7 @@ static ssize_t restore_wifi_wrong_action_debug(struct device *dev, struct device
         if(value == 1) {
             hwlog_info("%s enter should invoke wrong action handler\n", __func__);
             if(dev_handle.wl_trigger_disable_nmode_handle == NULL) {
-                hwlog_err("%s: handle has not been registered\n");
+                hwlog_err("handle has not been registered\n");
                 return -1;
             }
             dev_handle.wl_trigger_disable_nmode_handle();
@@ -816,6 +904,9 @@ struct wifi_platform_data bcm_wifi_control = {
 	.get_fw_path = bcm_wifi_get_fw_path,
 	.get_chip_type = bcm_wifi_get_chip_type,
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+	.get_bcn_timeout = bcm_wifi_get_bcn_timeout,
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
 };
 
 static struct resource bcm_wifi_resources[] = {
@@ -987,7 +1078,6 @@ int dhd_wlan_dev_wake(int on)
 		hwlog_info("%s Enter: dev_wake is not support\n", __func__);
 		return -EIO;
 	}
-	//pr_info("%s Enter: dev_wake %s\n", __func__, on ? "on" : "off");
 
 	if (on) {
 		if (gpio_direction_output(gpio_wl_dev_wake, 1)) {
@@ -1050,6 +1140,9 @@ int  wifi_power_probe(struct platform_device *pdev)
 	const char *ictype = NULL;
 	const char *fw = NULL;
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+	u32 bcn_timeout = 0;
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
 
 	memset(&dev_handle, 0, sizeof(struct dev_wifi_handle));
 
@@ -1224,6 +1317,17 @@ int  wifi_power_probe(struct platform_device *pdev)
 	}
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
 
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+	ret = of_property_read_u32(pdev->dev.of_node, "bcn_timeout", &bcn_timeout);
+	if (ret < 0) {
+		hwlog_err("%s: get bcn_timeout failed, ret:%d.\n", __func__, ret);
+		wifi_host->bcn_timeout = -1;
+	} else {
+		wifi_host->bcn_timeout = (int)bcn_timeout;
+		hwlog_info("%s: get bcn_timeout, value:%d.\n", __func__, wifi_host->bcn_timeout);
+	}
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
+
 	ret = platform_device_register(&bcm_wifi_device);
 	if (ret) {
 		hwlog_err("%s: platform_device_register failed, ret:%d.\n",
@@ -1248,6 +1352,9 @@ int  wifi_power_probe(struct platform_device *pdev)
 	g_abs_enabled = of_property_read_bool(pdev->dev.of_node,"abs_enabled");
 	hwlog_err("%s: abs_enabled: %d\n", __func__, g_abs_enabled);
 #endif
+#if defined(HW_WIFI_FACTORY_MODE)
+	init_wifi_pmic_clock(pdev);
+#endif
 	return 0;
 err_platform_device_register:
 	gpio_free(wifi_host->wifi_wakeup_irq);
@@ -1266,10 +1373,42 @@ err_clk_get:
 	kfree(wifi_host);
 	wifi_host = NULL;
 err_malloc_wifi_host:
-	//deinit_wifi_mem();
 	return ret;
 }
 
+#if defined(HW_WIFI_FACTORY_MODE)
+int init_wifi_pmic_clock(struct platform_device *pdev) {
+	struct device *dev = &pdev->dev;
+
+	g_pmic_clk = devm_clk_get(dev, "clk_wifi");
+	if (IS_ERR_OR_NULL(g_pmic_clk)) {
+		hwlog_err("devm_clk_get: clk_wifi not found!\n");
+		g_pmic_clk = NULL;
+		return -EFAULT;
+	}
+	return 0;
+}
+
+int hw_enable_pmic_clock(int enable) {
+	int ret = 0;
+
+	if (NULL != g_pmic_clk) {
+		if (enable) {
+			ret = clk_prepare_enable(g_pmic_clk);
+			hwlog_err("hw_enable_pmic_clock: state:%d, ret:%d\n", enable, ret);
+		} else {
+			ret = 0;
+			clk_disable_unprepare(g_pmic_clk);
+			hwlog_err("hw_enable_pmic_clock: state:%d\n", enable);
+		}
+		return ret;
+	}
+	hwlog_err("hw_enable_pmic_clock: g_pmic_clk is NULL\n");
+	return -EFAULT;
+}
+EXPORT_SYMBOL(hw_enable_pmic_clock);
+
+#endif
 
 
 static struct of_device_id wifi_power_match_table[] = {
@@ -1337,6 +1476,9 @@ struct UT_TEST UT_dev_wifi = {
 	.bcm_wifi_get_fw_path = bcm_wifi_get_fw_path,
 	.bcm_wifi_get_chip_type = bcm_wifi_get_chip_type,
 #endif /* HW_WIFI_DRIVER_NORMALIZE */
+#ifdef HW_CUSTOM_BCN_TIMEOUT
+	.bcm_wifi_get_bcn_timeout = bcm_wifi_get_bcn_timeout,
+#endif /* HW_CUSTOM_BCN_TIMEOUT */
 	.bcm_wifi_reset = bcm_wifi_reset,
 
 };

@@ -52,7 +52,9 @@
 #include <hw_wifi.h>
 
 #include <wl_dbg.h>
+#undef WL_ERROR
 #define WL_ERROR(x) printk x
+#undef WL_TRACE
 #define WL_TRACE(x)
 
 /*
@@ -122,17 +124,17 @@
 #endif
 
 #ifdef CONFIG_HW_VOWIFI
-#define CMD_GET_MODE	"GET MODE"
-#define CMD_SET_MODE	"SET MODE"
-#define CMD_GET_PERIOD	"GET PERIOD"
-#define CMD_SET_PERIOD	"SET PERIOD"
-#define CMD_GET_LOW_THRESHOLD	"GET LOW_THRESHOLD"
-#define CMD_SET_LOW_THRESHOLD	"SET LOW_THRESHOLD"
-#define CMD_GET_HIGH_THRESHOLD	"GET HIGH_THRESHOLD"
-#define CMD_SET_HIGH_THRESHOLD	"SET HIGH_THRESHOLD"
-#define CMD_GET_TRIGGER_COUNT 	"GET TRIGGER_COUNT"
-#define CMD_SET_TRIGGER_COUNT 	"SET TRIGGER_COUNT"
-#define VOWIFI_IS_SUPPORT   "VOWIFI_IS_SUPPORT"
+#define CMD_GET_MODE	"VOWIFI_DETECT GET MODE"
+#define CMD_SET_MODE	"VOWIFI_DETECT SET MODE"
+#define CMD_GET_PERIOD	"VOWIFI_DETECT GET PERIOD"
+#define CMD_SET_PERIOD	"VOWIFI_DETECT SET PERIOD"
+#define CMD_GET_LOW_THRESHOLD	"VOWIFI_DETECT GET LOW_THRESHOLD"
+#define CMD_SET_LOW_THRESHOLD	"VOWIFI_DETECT SET LOW_THRESHOLD"
+#define CMD_GET_HIGH_THRESHOLD	"VOWIFI_DETECT GET HIGH_THRESHOLD"
+#define CMD_SET_HIGH_THRESHOLD	"VOWIFI_DETECT SET HIGH_THRESHOLD"
+#define CMD_GET_TRIGGER_COUNT 	"VOWIFI_DETECT GET TRIGGER_COUNT"
+#define CMD_SET_TRIGGER_COUNT 	"VOWIFI_DETECT SET TRIGGER_COUNT"
+#define VOWIFI_IS_SUPPORT   "VOWIFI_DETECT VOWIFI_IS_SUPPORT"
 
 #define CMD_VOWIFI_MODE		"vowifi_mode"
 #define CMD_VOWIFI_PERIOD   "vowifi_rssi_period"
@@ -1430,7 +1432,7 @@ wl_android_set_vowifi(struct net_device *dev, char *buf, int total_len,
 char *command, int value)
 {
 	int error = 0;
-	int bytes_written;
+	int bytes_written = 0;
 
 	WL_ERR(("%s:vowifi command = %s value = %d\n", __FUNCTION__,command,value));
 	error = wldev_iovar_setint(dev, command, value);
@@ -1463,7 +1465,8 @@ char *command, int value)
 static int
 wl_android_get_vowifi(struct net_device *dev,char *buf, int total_len, char *command)
 {
-	int error,bytes_written,val;
+	int error,val;
+	int bytes_written = 0;
 
 	error = wldev_iovar_getint(dev, command, &val);
 	WL_ERR(("%s:vowifi get val = %d\n", __FUNCTION__, val));
@@ -1571,7 +1574,7 @@ dev_wlc_ioctl(
 	ioc.buf = arg;
 	ioc.len = len;
 
-	strcpy(ifr.ifr_name, dev->name);
+	strncpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name) - 1);
 	ifr.ifr_data = (caddr_t) &ioc;
 
 	fs = get_fs();
@@ -1605,7 +1608,7 @@ dev_wlc_intvar_set(
 
 	return (dev_wlc_ioctl(dev, WLC_SET_VAR, buf, len));
 }
-
+#ifndef HW_SOFTAP_ENABLE_BW_80
 static int
 dev_iw_iovar_setbuf(
 	struct net_device *dev,
@@ -1641,7 +1644,7 @@ dev_iw_write_cfg0_bss_var(struct net_device *dev, int val)
 	WL_TRACE(("%s: bss_set_result:%d set with %d\n", __FUNCTION__, bss_set_res, val));
 	return bss_set_res;
 }
-
+#endif
 #ifdef HW_SOFTAP_REASON_CODE
 /* 802.11-2012 Table 8-36--Reason codes */
 /* Previous authentication no longer valid */
@@ -1791,7 +1794,7 @@ init_ap_profile_from_string(char *param_str, struct ap_profile *ap_cfg)
 		PTYPE_STRING,  &ap_cfg->country_code, 3);
 	return ret;
 }
-
+#ifndef HW_SOFTAP_ENABLE_BW_80
 #ifndef AP_ONLY
 static int last_auto_channel = 6;
 #endif
@@ -1844,7 +1847,7 @@ fail :
 	}
 	return res;
 }
-
+#endif
 static int
 set_ap_cfg_hw(struct net_device *dev, struct ap_profile *ap)
 {
@@ -2260,8 +2263,8 @@ wl_android_set_disassoc_roaming_bssid(struct net_device *dev, char *command, int
 {
 	int error;
 	int mode = AUTO_RECOVERY_BY_MANUAL;
-    WL_TRACE(("%s: wl_android_set_disassoc_roaming_bssid\n", dev->name));
 	scb_val_t scbval;
+	WL_TRACE(("%s: wl_android_set_disassoc_roaming_bssid\n", dev->name));
 	memset(&scbval, 0, sizeof(scb_val_t));
 	if(!command)
 	{
@@ -2287,7 +2290,9 @@ wl_android_set_disassoc_roaming_bssid(struct net_device *dev, char *command, int
 }
 
 #endif
-
+#ifdef HW_SHARE_WIFI_FILTER_MANAGE
+bool g_force_stop_filter = false;
+#endif
 int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 {
 #define PRIVATE_COMMAND_MAX_LEN	8192
@@ -2298,9 +2303,7 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 	char *command = NULL;
 	int bytes_written = 0;
 	android_wifi_priv_cmd priv_cmd;
-#ifdef BRCM_RSDB
-	dhd_pub_t * dhd_pub = NULL;
-#endif
+	dhd_pub_t * dhd_pub = hw_get_dhd_pub(net);
 
 	net_os_wake_lock(net);
 #ifdef BCM_PATCH_CVE_2016_2475
@@ -2393,9 +2396,19 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 	}
 #ifdef PKT_FILTER_SUPPORT
 	else if (strnicmp(command, CMD_RXFILTER_START, strlen(CMD_RXFILTER_START)) == 0) {
+#ifdef HW_SHARE_WIFI_FILTER_MANAGE
+		g_force_stop_filter = false;
+		if (dhd_pub && dhd_pub->in_suspend)
+			dhd_dev_apf_enable_filter(net);
+#endif /* HW_SHARE_WIFI_FILTER_MANAGE */
 		bytes_written = net_os_enable_packet_filter(net, 1);
 	}
 	else if (strnicmp(command, CMD_RXFILTER_STOP, strlen(CMD_RXFILTER_STOP)) == 0) {
+#ifdef HW_SHARE_WIFI_FILTER_MANAGE
+		g_force_stop_filter = true;
+		if (dhd_pub && !dhd_pub->in_suspend)
+			dhd_dev_apf_enable_filter(net);
+#endif
 		bytes_written = net_os_enable_packet_filter(net, 0);
 	}
 	else if (strnicmp(command, CMD_RXFILTER_ADD, strlen(CMD_RXFILTER_ADD)) == 0) {
@@ -2416,7 +2429,9 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 	else if (strnicmp(command, CMD_BTCOEXMODE, strlen(CMD_BTCOEXMODE)) == 0) {
 #ifdef WL_CFG80211
 		void *dhdp = wl_cfg80211_get_dhdp();
-		bytes_written = wl_cfg80211_set_btcoex_dhcp(net, dhdp, command);
+		if (NULL != dhdp) {
+			bytes_written = wl_cfg80211_set_btcoex_dhcp(net, dhdp, command);
+		}
 #else
 #ifdef PKT_FILTER_SUPPORT
 		uint mode = *(command + strlen(CMD_BTCOEXMODE) + 1) - '0';

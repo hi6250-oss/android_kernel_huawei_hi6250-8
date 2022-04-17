@@ -506,7 +506,7 @@ dhd_flowid_find(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 
 	ASSERT(if_flow_lkup);
 	if (NULL == if_flow_lkup)
-	   return;
+		return FLOWID_INVALID;
 	if (if_flow_lkup[ifindex].role == WLC_E_IF_ROLE_STA) {
 #ifdef WLTDLS
 		if (dhdp->peer_tbl.tdls_peer_count && !(ETHER_ISMULTI(da)) &&

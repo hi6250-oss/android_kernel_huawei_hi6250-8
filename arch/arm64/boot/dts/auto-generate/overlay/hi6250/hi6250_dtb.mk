@@ -1,9 +1,9 @@
 #Copyright Huawei Technologies Co., Ltd. 1998-2011. All rights reserved.
-#This file is Auto Generated 
+#This file is Auto Generated
 
 
-targets += hi6250_dtbo
-targets += $(dtb-y)
+#targets += hi6250_dtbo
+#targets += $(dtb-y)
 
 # *.dtbo used to be generated in the directory above. Clean out the
 # old build results so people don't accidentally use them.
